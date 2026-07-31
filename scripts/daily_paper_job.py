@@ -562,8 +562,8 @@ def build_position_report(
     *,
     generated_at: datetime,
     title: str = "Quant Lab 午间盘位报告",
-    max_holdings: int = 5,
-    max_plans: int = 5,
+    max_holdings: int = 20,
+    max_plans: int = 20,
 ) -> str:
     account = dashboard["account"]
     latest = dashboard.get("latest")
