@@ -161,8 +161,11 @@ class PaperStore:
             "last_date",
             "pending_plan",
             "universe",
+            "configuration",
+            "market_research",
         ):
-            stored[key] = deepcopy(account.get(key))
+            if key in account:
+                stored[key] = deepcopy(account.get(key))
         stored["updated_at"] = datetime.now().isoformat(timespec="seconds")
         self._touch()
 
@@ -253,6 +256,20 @@ class PaperStore:
         ]
         journals.append(item)
         self._touch()
+
+    def attach_market_research(
+        self,
+        account_id: str,
+        trade_date: str,
+        research: dict[str, Any],
+    ) -> None:
+        """Attach the cross-sectional evidence to that day's audit journal."""
+        self._assert_account(account_id)
+        for journal in reversed(self._document["daily_journals"]):
+            if journal.get("trade_date") == trade_date:
+                journal["market_research"] = deepcopy(research)
+                self._touch()
+                return
 
     def save_version(
         self,

@@ -45,6 +45,7 @@ jobs:
     timeout-minutes: 45
     env:
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      BOCHA_API_KEY: ${{ secrets.BOCHA_API_KEY }}
       WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
       PAPER_AS_OF_DATE: ${{ inputs.as_of_date || '' }}
       PAPER_JOB_MODE: ${{ github.event_name == 'schedule' && github.event.schedule == '0 12 * * *' && 'noon-position' || inputs.job_mode || 'daily-close' }}

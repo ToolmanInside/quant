@@ -123,6 +123,7 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
+    monkeypatch.setenv("BOCHA_API_KEY", "test-bocha-token")
     monkeypatch.setenv(
         "WECHAT_WEBHOOK_URL",
         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
@@ -131,6 +132,9 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     config = load_unified_config(Path("config/quant-config.json"))
 
     assert config.tushare_token == "test-token"
+    assert config.bocha_api_key == "test-bocha-token"
+    assert config.market_universe.mode == "full_market"
+    assert config.news_research.enabled
     assert config.wechat_webhook_url.endswith("key=test")
     assert config.paper_account.frequency == "1d"
     assert config.paper_account.strategy_id == "moving_average"

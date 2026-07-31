@@ -122,6 +122,7 @@ class PaperSimulationRequest(BaseModel):
     strategy_id: Literal["moving_average", "momentum", "breakout"] = (
         "moving_average"
     )
+    universe_mode: Literal["fixed", "full_market"] = "fixed"
     symbols: list[str] = Field(default_factory=lambda: DEFAULT_MATRIX_SYMBOLS.copy())
     backtest_start_date: date = date(2024, 1, 1)
     backtest_end_date: date = date(2025, 12, 31)
@@ -141,8 +142,8 @@ class PaperSimulationRequest(BaseModel):
         normalized = list(dict.fromkeys(normalize_ts_code(item) for item in raw_symbols))
         if len(normalized) < 5:
             raise ValueError("模拟组合至少需要 5 个候选标的")
-        if len(normalized) > 50:
-            raise ValueError("单次最多使用 50 个候选标的")
+        if len(normalized) > 120:
+            raise ValueError("单次最多使用 120 个候选标的")
         return normalized
 
     @model_validator(mode="after")

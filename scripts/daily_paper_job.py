@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from datetime import date, datetime
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta
 import json
 import logging
 import os
@@ -19,7 +19,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.data.providers import TushareDataProvider
+from backend.market_research import (
+    DEFAULT_FACTOR_WEIGHTS,
+    MarketUniverseConfig,
+    research_full_market,
+)
 from backend.models import PaperAdvanceRequest, PaperSimulationRequest
+from backend.news_research import NewsResearchConfig, enrich_with_bocha_news
 from backend.paper_store import PaperStore
 from backend.paper_trading import advance_paper_simulation, replay_paper_simulation
 
@@ -42,12 +48,16 @@ class JobConfig:
     backtest_end_date: date
     simulation_start_date: date
     initial_cash: float
+    universe_mode: str = "fixed"
 
 
 @dataclass(frozen=True)
 class UnifiedConfig:
     paper_account: JobConfig
     tushare_token: str
+    bocha_api_key: str
+    market_universe: MarketUniverseConfig
+    news_research: NewsResearchConfig
     timezone: str
     position_report_at: str
     daily_close_at: str
@@ -104,6 +114,60 @@ def load_unified_config(path: Path) -> UnifiedConfig:
     market = payload.get("market_data") or {}
     if market.get("provider", "tushare") != "tushare":
         raise ValueError("当前系统只支持 Tushare 数据源")
+    universe_payload = payload.get("market_universe") or {}
+    universe_mode = str(universe_payload.get("mode", "fixed"))
+    if universe_mode not in {"fixed", "full_market"}:
+        raise ValueError("market_universe.mode 只能是 fixed 或 full_market")
+    factor_weights = universe_payload.get("factor_weights") or DEFAULT_FACTOR_WEIGHTS
+    if not isinstance(factor_weights, dict):
+        raise ValueError("market_universe.factor_weights 必须是对象")
+    market_universe = MarketUniverseConfig(
+        mode=universe_mode,
+        minimum_listing_days=max(
+            0,
+            int(universe_payload.get("minimum_listing_days", 180)),
+        ),
+        minimum_daily_amount=max(
+            0.0,
+            float(universe_payload.get("minimum_daily_amount", 50_000_000)),
+        ),
+        detailed_candidate_count=max(
+            5,
+            min(int(universe_payload.get("detailed_candidate_count", 40)), 100),
+        ),
+        top_sector_count=max(
+            1,
+            min(int(universe_payload.get("top_sector_count", 8)), 20),
+        ),
+        max_candidates_per_sector=max(
+            1,
+            min(int(universe_payload.get("max_candidates_per_sector", 6)), 20),
+        ),
+        always_include_symbols=[
+            str(symbol)
+            for symbol in universe_payload.get("always_include_symbols", [])
+        ],
+        factor_weights={
+            str(name): float(value) for name, value in factor_weights.items()
+        },
+    )
+    news_payload = payload.get("news_research") or {}
+    news_enabled = bool(news_payload.get("enabled", False))
+    news_research = NewsResearchConfig(
+        enabled=news_enabled,
+        freshness=str(news_payload.get("freshness", "oneWeek")),
+        results_per_query=max(
+            1,
+            min(int(news_payload.get("results_per_query", 5)), 10),
+        ),
+        max_sectors=max(0, min(int(news_payload.get("max_sectors", 3)), 10)),
+        max_stocks=max(0, min(int(news_payload.get("max_stocks", 8)), 20)),
+        factor_weight=max(
+            0.0,
+            min(float(news_payload.get("factor_weight", 0.05)), 0.10),
+        ),
+        timeout_seconds=max(1, int(news_payload.get("timeout_seconds", 20))),
+    )
     schedule = payload.get("schedule") or {}
     storage = payload.get("storage") or {}
     notification = payload.get("notification") or {}
@@ -144,11 +208,19 @@ def load_unified_config(path: Path) -> UnifiedConfig:
                 account_payload["simulation_start_date"]
             ),
             initial_cash=float(account_payload["initial_cash"]),
+            universe_mode=universe_mode,
         ),
         tushare_token=_resolve_environment_placeholder(
             market.get("tushare_token"),
             "market_data.tushare_token",
         ),
+        bocha_api_key=_resolve_environment_placeholder(
+            news_payload.get("api_key", ""),
+            "news_research.api_key",
+            required=news_enabled,
+        ),
+        market_universe=market_universe,
+        news_research=news_research,
         timezone=timezone,
         position_report_at=position_report_at,
         daily_close_at=daily_close_at,
@@ -245,6 +317,137 @@ def _plan_lines(
     return lines
 
 
+def _market_research_lines(dashboard: dict[str, Any]) -> list[str]:
+    research = (
+        dashboard.get("market_research")
+        or dashboard.get("account", {}).get("market_research")
+    )
+    if not research:
+        return ["- 未运行全市场横截面研究（当前为固定股票池模式）。"]
+    if research.get("mode") != "full_market":
+        warnings = research.get("warnings") or ["本次已降级到固定候选池"]
+        return [f"- ⚠️ {_trim(str(message), 150)}" for message in warnings]
+
+    coverage = research.get("factor_coverage") or {}
+    lines = [
+        (
+            f"- 截面日期 **{research.get('trade_date', '—')}**；扫描 "
+            f"**{int(research.get('market_count', 0)):,}** 只，基础过滤后 "
+            f"**{int(research.get('eligible_count', 0)):,}** 只，进入详细趋势池 "
+            f"**{int(research.get('detailed_candidate_count', 0))}** 只。"
+        ),
+        (
+            "- 因子覆盖率："
+            f"估值 {float(coverage.get('valuation', 0)):.0%}；"
+            f"盈利质量 {float(coverage.get('quality', 0)):.0%}；"
+            f"换手 {float(coverage.get('turnover', 0)):.0%}；"
+            f"资金流 {float(coverage.get('fund_flow', 0)):.0%}。"
+        ),
+        (
+            f"- 全市场过滤样本上涨宽度："
+            f"**{float(research.get('market_breadth', 0)):.1%}**。"
+        ),
+    ]
+    sectors = research.get("top_sectors") or []
+    if sectors:
+        lines.append(
+            "- 多因子领先板块："
+            + "；".join(
+                (
+                    f"{item['name']} {float(item['score']):.2f}"
+                    f"（上涨宽度 {float(item['breadth']):.0%}）"
+                )
+                for item in sectors[:5]
+            )
+        )
+    candidates = research.get("candidates") or []
+    visible_candidates = [
+        item for item in candidates if not item.get("excluded_by_news")
+    ][:5]
+    if visible_candidates:
+        lines.append(
+            "- 结构化因子候选："
+            + "；".join(
+                (
+                    f"{item['name']} `{item['symbol']}` "
+                    f"{float(item['factor_score']):.2f}"
+                )
+                for item in visible_candidates
+            )
+        )
+    lines.extend(
+        f"- ⚠️ {_trim(str(message), 150)}"
+        for message in (research.get("warnings") or [])[:3]
+    )
+    return lines
+
+
+def _news_research_lines(dashboard: dict[str, Any]) -> list[str]:
+    research = (
+        dashboard.get("market_research")
+        or dashboard.get("account", {}).get("market_research")
+        or {}
+    )
+    news = research.get("news") or {}
+    if not news.get("enabled"):
+        return ["- Bocha 新闻研究未启用；结构化因子与技术策略仍可独立运行。"]
+
+    lines = [
+        (
+            "- 新闻仅作低权重校验与重大风险否决，"
+            f"当前权重 **{float(news.get('factor_weight', 0)):.0%}**，"
+            "不直接触发买卖。"
+        )
+    ]
+    sector_news = news.get("sectors") or []
+    if sector_news:
+        lines.append(
+            "- 板块新闻评分："
+            + "；".join(
+                f"{item['name']} {float(item['sentiment_score']):.2f}"
+                f"（风险 {item['risk_level']}）"
+                for item in sector_news[:3]
+            )
+        )
+    risky = [
+        item
+        for item in news.get("stocks", [])
+        if item.get("risk_level") in {"medium", "high"}
+    ]
+    if risky:
+        for item in risky[:3]:
+            keywords = (
+                item.get("severe_risk_keywords")
+                or item.get("negative_keywords")
+                or []
+            )
+            lines.append(
+                f"- {item['name']} `{item['symbol']}` 新闻风险 "
+                f"**{item['risk_level']}**：{', '.join(keywords) or '需人工核验'}"
+            )
+    else:
+        lines.append("- 已检索的重点候选中未命中规则库里的重大负面关键词。")
+
+    linked = []
+    for item in news.get("stocks", []):
+        for article in item.get("items", []):
+            linked.append(article)
+            if len(linked) >= 3:
+                break
+        if len(linked) >= 3:
+            break
+    for article in linked:
+        source = f"（{article['source']}）" if article.get("source") else ""
+        lines.append(
+            f"- [{_trim(article['title'], 45)}]({article['url']}){source}"
+        )
+    lines.extend(
+        f"- ⚠️ {_trim(str(message), 150)}"
+        for message in (news.get("errors") or [])[:2]
+    )
+    return lines
+
+
 def build_markdown_report(
     dashboard: dict[str, Any],
     *,
@@ -332,6 +535,12 @@ def build_markdown_report(
             if include_reflection
             else []
         ),
+        "",
+        "#### 全市场板块与选股研究",
+        *_market_research_lines(dashboard),
+        "",
+        "#### 新闻与事件校验",
+        *_news_research_lines(dashboard),
         "",
         "#### 下一交易日计划",
         *_plan_lines(dashboard, max_plans),
@@ -476,7 +685,11 @@ def _configuration_changed(account: dict[str, Any], config: JobConfig) -> bool:
     return (
         stored.get("strategy_id") != config.strategy_id
         or stored.get("frequency", "1d") != config.frequency
-        or account.get("universe") != config.symbols
+        or stored.get("universe_mode", config.universe_mode) != config.universe_mode
+        or (
+            config.universe_mode == "fixed"
+            and account.get("universe") != config.symbols
+        )
         or float(account.get("initial_cash", 0)) != config.initial_cash
         or stored.get("backtest_start_date")
         != config.backtest_start_date.isoformat()
@@ -484,6 +697,133 @@ def _configuration_changed(account: dict[str, Any], config: JobConfig) -> bool:
         or stored.get("simulation_start_date")
         != config.simulation_start_date.isoformat()
     )
+
+
+def _active_market_universe(
+    provider: TushareDataProvider,
+    store: PaperStore,
+    config: JobConfig,
+    as_of_date: date,
+    universe_config: MarketUniverseConfig,
+    news_config: NewsResearchConfig,
+    bocha_api_key: str,
+) -> tuple[list[str], dict[str, Any] | None]:
+    if universe_config.mode != "full_market":
+        return list(config.symbols), None
+
+    account = store.account(config.account_id)
+    required_symbols = [
+        item["symbol"] for item in store.positions(config.account_id)
+    ] if account else []
+    if account:
+        required_symbols.extend(
+            item["symbol"] for item in account.get("pending_plan", [])
+        )
+    try:
+        result = research_full_market(provider, as_of_date, universe_config)
+        if news_config.enabled:
+            result = enrich_with_bocha_news(
+                result,
+                bocha_api_key,
+                news_config,
+            )
+        selected = [
+            item["symbol"]
+            for item in result.summary["candidates"]
+            if not item.get("excluded_by_news", False)
+        ][: universe_config.detailed_candidate_count]
+        active = list(
+            dict.fromkeys(
+                selected
+                + universe_config.always_include_symbols
+                + required_symbols
+            )
+        )
+        if len(active) < 5:
+            active = list(dict.fromkeys(active + config.symbols))
+        result.summary["active_symbols"] = active
+        result.summary["required_position_symbols"] = list(
+            dict.fromkeys(required_symbols)
+        )
+        return active, result.summary
+    except Exception as exc:
+        LOGGER.exception("全市场研究失败，降级使用配置中的固定候选池")
+        return list(dict.fromkeys(config.symbols + required_symbols)), {
+            "mode": "degraded_fixed_fallback",
+            "trade_date": as_of_date.isoformat(),
+            "market_count": 0,
+            "eligible_count": 0,
+            "detailed_candidate_count": len(config.symbols),
+            "top_sectors": [],
+            "candidates": [],
+            "factor_coverage": {},
+            "warnings": [
+                "全市场研究失败，本次仅使用配置中的固定候选池："
+                f"{type(exc).__name__}: {exc}"
+            ],
+            "news": {
+                "enabled": news_config.enabled,
+                "provider": "bocha",
+                "sectors": [],
+                "stocks": [],
+                "errors": ["因全市场结构化数据失败，未执行新闻研究"],
+            },
+        }
+
+
+def _persist_research_context(
+    store: PaperStore,
+    config: JobConfig,
+    active_symbols: list[str],
+    market_research: dict[str, Any] | None,
+) -> None:
+    account = store.account(config.account_id)
+    if account is None:
+        return
+    account["universe"] = active_symbols
+    configuration = dict(account.get("configuration") or {})
+    configuration["universe_mode"] = config.universe_mode
+    account["configuration"] = configuration
+    if market_research is not None:
+        account["market_research"] = market_research
+        research_date = str(market_research.get("trade_date") or "")
+        if research_date:
+            store.attach_market_research(
+                config.account_id,
+                research_date,
+                market_research,
+            )
+        candidate_map = {
+            item["symbol"]: item
+            for item in market_research.get("candidates", [])
+        }
+        enriched_plan = []
+        for plan in account.get("pending_plan", []):
+            item = dict(plan)
+            candidate = candidate_map.get(item["symbol"])
+            if candidate and "全市场多因子" not in str(item.get("reason", "")):
+                factors = candidate.get("factors") or {}
+                factor_detail = "/".join(
+                    f"{label}{float(factors.get(key, 0)):.2f}"
+                    for key, label in (
+                        ("valuation", "估"),
+                        ("quality", "质"),
+                        ("turnover", "换"),
+                        ("fund_flow", "流"),
+                    )
+                )
+                item["reason"] = (
+                    f"{item['reason']}；全市场多因子 "
+                    f"{float(candidate['factor_score']):.2f}"
+                    f"（{factor_detail}）"
+                )
+                if candidate.get("news_risk_level") not in (None, "unknown"):
+                    item["reason"] += (
+                        f"；新闻风险 {candidate['news_risk_level']}"
+                    )
+            enriched_plan.append(item)
+        account["pending_plan"] = enriched_plan
+    store.save_account(account)
 
 
 def run_daily_job(
@@ -494,24 +834,42 @@ def run_daily_job(
     tushare_token: str,
     force_reinitialize: bool = False,
     reinitialize_on_config_change: bool = True,
+    market_universe: MarketUniverseConfig | None = None,
+    news_research: NewsResearchConfig | None = None,
+    bocha_api_key: str = "",
 ) -> dict[str, Any]:
     if as_of_date < config.simulation_start_date:
         raise ValueError(
             "任务日期早于模拟盘起点，请修改统一配置文件中的 simulation_start_date"
         )
 
+    universe_config = market_universe or MarketUniverseConfig(
+        mode=config.universe_mode
+    )
+    news_config = news_research or NewsResearchConfig(enabled=False)
     provider = TushareDataProvider(tushare_token)
     store = PaperStore(state_path)
     try:
+        active_symbols, market_research_summary = _active_market_universe(
+            provider,
+            store,
+            config,
+            as_of_date,
+            universe_config,
+            news_config,
+            bocha_api_key,
+        )
+        effective_config = replace(config, symbols=active_symbols)
         account = store.account(config.account_id)
         configuration_changed = (
             account is not None and _configuration_changed(account, config)
         )
-        if (
+        should_reinitialize = (
             account is None
             or force_reinitialize
             or (configuration_changed and reinitialize_on_config_change)
-        ):
+        )
+        if should_reinitialize:
             if configuration_changed and not force_reinitialize:
                 LOGGER.warning(
                     "检测到账户关键配置变化，自动重建账户 %s",
@@ -522,37 +880,131 @@ def run_daily_job(
                 config.account_id,
                 as_of_date,
             )
-            return replay_paper_simulation(
+            research_date = (
+                date.fromisoformat(str(market_research_summary["trade_date"]))
+                if market_research_summary
+                and market_research_summary.get("mode") == "full_market"
+                else as_of_date
+            )
+            transition_end = research_date - timedelta(days=1)
+            use_fixed_history_transition = (
+                config.universe_mode == "full_market"
+                and transition_end >= config.simulation_start_date
+            )
+            replay_symbols = (
+                config.symbols
+                if use_fixed_history_transition
+                else effective_config.symbols
+            )
+            replay_end = (
+                transition_end
+                if use_fixed_history_transition
+                else as_of_date
+            )
+            result = replay_paper_simulation(
                 PaperSimulationRequest(
                     account_id=config.account_id,
                     strategy_id=config.strategy_id,
-                    symbols=config.symbols,
+                    universe_mode=config.universe_mode,
+                    symbols=replay_symbols,
                     backtest_start_date=config.backtest_start_date,
                     backtest_end_date=config.backtest_end_date,
                     simulation_start_date=config.simulation_start_date,
-                    simulation_end_date=as_of_date,
+                    simulation_end_date=replay_end,
                     initial_cash=config.initial_cash,
                 ),
                 provider,
                 store,
             )
+            if "account" not in result:
+                return result
+            if use_fixed_history_transition:
+                assert market_research_summary is not None
+                transition_account = store.account(config.account_id) or {}
+                transition_required = [
+                    item["symbol"] for item in store.positions(config.account_id)
+                ] + [
+                    item["symbol"]
+                    for item in transition_account.get("pending_plan", [])
+                ]
+                active_symbols = list(
+                    dict.fromkeys(active_symbols + transition_required)
+                )
+                effective_config = replace(config, symbols=active_symbols)
+                market_research_summary["active_symbols"] = active_symbols
+                market_research_summary["required_position_symbols"] = list(
+                    dict.fromkeys(transition_required)
+                )
+                market_research_summary["warnings"].append(
+                    "全市场模式首次启用：历史模拟沿用配置中的固定池，"
+                    f"自 {research_date} 起才按每日全市场截面动态选股，"
+                    "避免用今天候选回看过去造成事后选股偏差。"
+                )
+                _persist_research_context(
+                    store,
+                    effective_config,
+                    active_symbols,
+                    market_research_summary,
+                )
+                result = advance_paper_simulation(
+                    PaperAdvanceRequest(
+                        account_id=config.account_id,
+                        symbols=effective_config.symbols,
+                        as_of_date=as_of_date,
+                    ),
+                    provider,
+                    store,
+                )
+        else:
+            if configuration_changed:
+                raise ValueError(
+                    "仓库配置与持久化模拟账户不一致。"
+                    "请手动运行工作流并启用 force_reinitialize 以重建账户。"
+                )
 
-        if configuration_changed:
-            raise ValueError(
-                "仓库配置与持久化模拟账户不一致。"
-                "请手动运行工作流并启用 force_reinitialize 以重建账户。"
+            _persist_research_context(
+                store,
+                effective_config,
+                active_symbols,
+                market_research_summary,
+            )
+            LOGGER.info(
+                "更新模拟账户 %s 到 %s；详细候选池 %s 只",
+                config.account_id,
+                as_of_date,
+                len(active_symbols),
+            )
+            result = advance_paper_simulation(
+                PaperAdvanceRequest(
+                    account_id=config.account_id,
+                    symbols=effective_config.symbols,
+                    as_of_date=as_of_date,
+                ),
+                provider,
+                store,
             )
 
-        LOGGER.info("更新模拟账户 %s 到 %s", config.account_id, as_of_date)
-        return advance_paper_simulation(
-            PaperAdvanceRequest(
-                account_id=config.account_id,
-                symbols=config.symbols,
-                as_of_date=as_of_date,
-            ),
-            provider,
+        run_metadata = result.get("run") or {}
+        if (
+            market_research_summary is not None
+            and market_research_summary.get("mode") == "full_market"
+            and int(run_metadata.get("processed_days", 0)) > 1
+        ):
+            market_research_summary["warnings"].append(
+                "本次补算了多个遗漏交易日；最终计划使用最新全市场截面，"
+                "中间日期没有逐日重建完整横截面，不应用于严格历史绩效评价。"
+            )
+        _persist_research_context(
             store,
+            effective_config,
+            active_symbols,
+            market_research_summary,
         )
+        dashboard = store.dashboard(config.account_id)
+        dashboard["run"] = run_metadata
+        if market_research_summary is not None:
+            dashboard["market_research"] = market_research_summary
+        return dashboard
     finally:
         store.close()
 
@@ -648,6 +1100,9 @@ def main() -> int:
                 reinitialize_on_config_change=(
                     unified.reinitialize_on_config_change
                 ),
+                market_universe=unified.market_universe,
+                news_research=unified.news_research,
+                bocha_api_key=unified.bocha_api_key,
             )
             report = build_markdown_report(
                 dashboard,

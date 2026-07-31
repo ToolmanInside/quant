@@ -1199,6 +1199,7 @@ def replay_paper_simulation(
         "strategy_id": request.strategy_id,
         "strategy_name": STRATEGY_NAMES[request.strategy_id],
         "frequency": "1d",
+        "universe_mode": request.universe_mode,
         "backtest_start_date": request.backtest_start_date.isoformat(),
         "backtest_end_date": request.backtest_end_date.isoformat(),
         "simulation_start_date": request.simulation_start_date.isoformat(),
@@ -1244,14 +1245,15 @@ def replay_paper_simulation(
     # 回测期只评估版本，不创建持仓、成交或资金快照。
     account["last_date"] = backtest_dates[-1].date().isoformat()
     store.save_account(account)
-    _automatic_upgrade(
-        store,
-        account,
-        frames,
-        industries,
-        backtest_dates,
-        request.strategy_id,
-    )
+    if request.universe_mode == "fixed":
+        _automatic_upgrade(
+            store,
+            account,
+            frames,
+            industries,
+            backtest_dates,
+            request.strategy_id,
+        )
     account = store.account(request.account_id)
     assert account is not None
     account["last_date"] = None
@@ -1336,7 +1338,11 @@ def advance_paper_simulation(
     )
     account = store.account(request.account_id)
     assert account is not None
-    if dates:
+    if (
+        dates
+        and account.get("configuration", {}).get("universe_mode", "fixed")
+        == "fixed"
+    ):
         _automatic_upgrade(
             store,
             account,

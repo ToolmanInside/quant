@@ -3,6 +3,36 @@
     "provider": "tushare",
     "tushare_token": "${TUSHARE_TOKEN}"
   },
+  "market_universe": {
+    "mode": "full_market",
+    "minimum_listing_days": 180,
+    "minimum_daily_amount": 50000000,
+    "detailed_candidate_count": 40,
+    "top_sector_count": 8,
+    "max_candidates_per_sector": 6,
+    "always_include_symbols": [
+      "159611.SZ"
+    ],
+    "factor_weights": {
+      "valuation": 0.2,
+      "quality": 0.25,
+      "turnover": 0.15,
+      "fund_flow": 0.2,
+      "liquidity": 0.1,
+      "price_strength": 0.1
+    }
+  },
+  "news_research": {
+    "enabled": true,
+    "provider": "bocha",
+    "api_key": "${BOCHA_API_KEY}",
+    "freshness": "oneWeek",
+    "results_per_query": 5,
+    "max_sectors": 3,
+    "max_stocks": 8,
+    "factor_weight": 0.05,
+    "timeout_seconds": 20
+  },
   "schedule": {
     "timezone": "Asia/Shanghai",
     "position_report_at": "12:00",

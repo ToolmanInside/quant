@@ -6,7 +6,8 @@ GitHub Actions 日终模拟与企业微信推送配置见
 面向 Windows 本地运行的量化研究、回测与模拟交易系统：
 
 - Tushare Pro 日线与复权因子适配
-- Tushare Pro 作为唯一行情数据源
+- Tushare Pro 全市场行情、估值、财务质量、换手率和资金流
+- Bocha 新闻检索作为低权重事件校验与重大风险否决
 - 双均线趋势策略
 - 策略 × 交易频率二维评测（双均线、价格动量、通道突破、RSI均值回归）
 - 日频、5交易日、20交易日统一成本回测与相对评分
@@ -37,9 +38,10 @@ GitHub Actions 日终模拟与企业微信推送配置见
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
-所有设置只读取 `config/quant-config.json`。在这里调整策略、股票池、资金、日期和
-其他运行参数；Tushare Token 与企业微信 Webhook 保留环境变量占位符，由本地 `.env`
-或 GitHub Secrets 注入。Token 只由 Python 服务读取，不会返回给浏览器。
+所有设置只读取 `config/quant-config.json`。在这里调整策略、全市场/固定股票池、
+因子权重、资金、日期和其他运行参数；Tushare Token、Bocha API Key 与企业微信
+Webhook 保留环境变量占位符，由本地 `.env` 或 GitHub Secrets 注入。密钥只由
+Python 任务读取，不会返回给浏览器，也不会写入日志和账户文本。
 
 ## 启动
 
@@ -77,6 +79,8 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 - 同一交易日重复运行不重复成交
 - 每个模拟交易日都记录回顾、市场分析、下一日决策和复盘结论
 - 查看持仓、权益、市场宽度、优选板块、异常反思和版本评估
+- 日终先扫描全部上市 A 股，再对少量候选拉取历史行情运行日频策略
+- 日报展示估值、盈利质量、换手、资金流因子覆盖率和可追溯新闻链接
 
 每个本地账户分别保存在
 `backend/data/simulation/accounts/<account_id>.txt`，均已加入
@@ -108,7 +112,7 @@ scripts/                 Windows 安装、启动与停止脚本
 
 ## 下一阶段
 
-1. 将 Tushare 数据落地到 Parquet/DuckDB，避免重复下载。
+1. 将逐日全市场截面落地到 Parquet，支持无幸存者偏差的历史全市场回测。
 2. 补充停牌、涨跌停无法成交和分红送转处理。
-3. 补充涨跌停、停牌延期成交和逐日 ST 状态。
+3. 补充逐日 ST 状态、历史行业成分和财务公告时点修订。
 4. 最后再接入 MiniQMT `xttrader` 仿真交易；历史行情仍由 Tushare 提供。
