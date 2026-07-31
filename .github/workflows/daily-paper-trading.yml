@@ -1,0 +1,100 @@
+name: Daily paper trading
+
+on:
+  schedule:
+    - cron: "0 12 * * *"
+      timezone: "Asia/Shanghai"
+    - cron: "0 18 * * *"
+      timezone: "Asia/Shanghai"
+  workflow_dispatch:
+    inputs:
+      job_mode:
+        description: "任务类型"
+        required: true
+        default: "daily-close"
+        type: choice
+        options:
+          - daily-close
+          - noon-position
+      as_of_date:
+        description: "任务日期（北京时间，留空表示今天）"
+        required: false
+        type: string
+      force_reinitialize:
+        description: "重建模拟账户（配置变更后使用）"
+        required: false
+        default: false
+        type: boolean
+      push_wechat:
+        description: "推送企业微信"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-paper-trading
+  cancel-in-progress: false
+
+jobs:
+  update-and-report:
+    name: Update, analyze and notify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+      PAPER_AS_OF_DATE: ${{ inputs.as_of_date || '' }}
+      PAPER_JOB_MODE: ${{ github.event_name == 'schedule' && github.event.schedule == '0 12 * * *' && 'noon-position' || inputs.job_mode || 'daily-close' }}
+      PAPER_FORCE_REINITIALIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_reinitialize || false }}
+      PAPER_PUSH_WECHAT: ${{ github.event_name != 'workflow_dispatch' || inputs.push_wechat }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install --requirement requirements.txt
+
+      - name: Restore paper account and market-data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .quant-state
+            backend/data/cache
+          key: quant-paper-state-v1-${{ github.run_id }}
+          restore-keys: |
+            quant-paper-state-v1-
+
+      - name: Update data, analyze and push tomorrow's plan
+        run: >-
+          python scripts/daily_paper_job.py
+          --config config/quant-config.example.json
+
+      - name: Save paper account and market-data cache
+        if: ${{ env.PAPER_JOB_MODE == 'daily-close' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .quant-state
+            backend/data/cache
+          key: quant-paper-state-v1-${{ github.run_id }}
+
+      - name: Upload daily report and account text backup
+        if: ${{ always() && hashFiles('outputs/*.md') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-report-${{ env.PAPER_JOB_MODE }}-${{ github.run_number }}
+          path: |
+            outputs/*.md
+            .quant-state/accounts/*.txt
+          retention-days: 90
