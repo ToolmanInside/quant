@@ -10,9 +10,7 @@
     "detailed_candidate_count": 40,
     "top_sector_count": 8,
     "max_candidates_per_sector": 6,
-    "always_include_symbols": [
-      // "159611.SZ"
-    ],
+    "always_include_symbols": [],
     "factor_weights": {
       "valuation": 0.2,
       "quality": 0.25,

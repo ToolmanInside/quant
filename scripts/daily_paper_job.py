@@ -93,7 +93,14 @@ def _resolve_environment_placeholder(
 
 
 def load_unified_config(path: Path) -> UnifiedConfig:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"配置文件 {path} 不是合法 JSON：第 {exc.lineno} 行、"
+            f"第 {exc.colno} 列，{exc.msg}。"
+            "JSON 不支持 // 或 # 注释；空列表请写成 []。"
+        ) from exc
     account_payload = payload.get("paper_account") or {}
     required = {
         "account_id",
