@@ -43,7 +43,6 @@ next-env.d.ts
 /outputs/
 /work/
 /.quant-state/
-/config/quant-config.json
 /.venv/
 /.npm-cache/
 /.pip-cache/
