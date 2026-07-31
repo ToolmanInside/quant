@@ -22,7 +22,7 @@ def test_one_account_is_persisted_as_readable_text(tmp_path) -> None:
 
     raw = path.read_text(encoding="utf-8")
     document = json.loads(raw)
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == 2
     assert document["account"]["account_id"] == "account-a"
     assert document["account"]["pending_plan"][0]["action"] == "BUY"
     assert "\n  \"account\"" in raw
@@ -30,3 +30,35 @@ def test_one_account_is_persisted_as_readable_text(tmp_path) -> None:
     restored = PaperStore(path)
     assert restored.account("account-a")["last_date"] == "2026-07-31"
     restored.close()
+
+
+def test_v1_account_requests_replay_after_automatic_migration(tmp_path) -> None:
+    path = tmp_path / "legacy.txt"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "account": {
+                    "account_id": "legacy",
+                    "initial_cash": 100_000,
+                    "cash": 100_000,
+                },
+                "positions": [],
+                "executions": [],
+                "snapshots": [],
+                "reviews": [],
+                "daily_journals": [],
+                "strategy_versions": [],
+                "upgrade_events": [],
+                "counters": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = PaperStore(path)
+    account = store.account("legacy")
+    assert account is not None
+    assert account["requires_reinitialize_reason"] == "corporate_action_ledger_v2"
+    store.close()
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 2

@@ -335,4 +335,14 @@ def research_full_market(
     trade_date, snapshot, errors = provider.fetch_market_snapshot(as_of_date)
     result = score_market_snapshot(snapshot, trade_date, config)
     result.summary["warnings"].extend(errors)
+    try:
+        result.summary["technical_breadth"] = (
+            provider.fetch_market_technical_breadth(trade_date)
+        )
+    except Exception as exc:
+        result.summary["technical_breadth"] = None
+        result.summary["warnings"].append(
+            "全市场20/60日趋势宽度获取失败，市场状态将降级使用详细候选池："
+            f"{type(exc).__name__}: {exc}"
+        )
     return result

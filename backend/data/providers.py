@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from pathlib import Path
 import json
 
+import numpy as np
 import pandas as pd
 
 from backend.models import is_etf
@@ -30,6 +31,14 @@ class TushareDataProvider:
         cache_path = self._cache_path("daily", symbol, start_date, end_date)
         cached = self._read_cache(cache_path, "trade_date")
         if cached is not None:
+            if not {"up_limit", "down_limit"}.issubset(cached.columns):
+                cached = self._merge_price_limits(
+                    cached,
+                    symbol,
+                    start_date,
+                    end_date,
+                )
+                self._write_cache(cache_path, cached)
             return MarketData(frame=cached, source="Tushare Pro（本地缓存）")
 
         start = start_date.strftime("%Y%m%d")
@@ -75,6 +84,12 @@ class TushareDataProvider:
         # Tushare日线成交量单位为手、成交额单位为千元，内部统一成股和元。
         frame["volume"] = frame["vol"] * 100
         frame["amount"] = frame["amount"] * 1_000
+        frame = self._merge_price_limits(
+            frame,
+            symbol,
+            start_date,
+            end_date,
+        )
         frame = frame[
             [
                 "trade_date",
@@ -82,6 +97,8 @@ class TushareDataProvider:
                 "high",
                 "low",
                 "close",
+                "up_limit",
+                "down_limit",
                 "adj_open",
                 "adj_high",
                 "adj_low",
@@ -92,6 +109,199 @@ class TushareDataProvider:
         ]
         self._write_cache(cache_path, frame)
         return MarketData(frame=frame, source="Tushare Pro")
+
+    def _merge_price_limits(
+        self,
+        frame: pd.DataFrame,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> pd.DataFrame:
+        cache_path = self._cache_path("price_limits", symbol, start_date, end_date)
+        if cache_path.exists():
+            limits = pd.read_csv(cache_path)
+        else:
+            limits = self._pro.stk_limit(
+                ts_code=symbol,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+                fields="ts_code,trade_date,pre_close,up_limit,down_limit",
+            )
+            if limits is None or limits.empty:
+                limits = pd.DataFrame(
+                    columns=["ts_code", "trade_date", "pre_close", "up_limit", "down_limit"]
+                )
+            self._write_cache(cache_path, limits)
+
+        result = frame.drop(columns=["up_limit", "down_limit"], errors="ignore").copy()
+        if limits.empty:
+            result["up_limit"] = np.nan
+            result["down_limit"] = np.nan
+            return result
+        limits = limits.copy()
+        limits["trade_date"] = pd.to_datetime(
+            limits["trade_date"], format="%Y%m%d", errors="coerce"
+        )
+        for column in ("up_limit", "down_limit"):
+            limits[column] = pd.to_numeric(limits[column], errors="coerce")
+        return result.merge(
+            limits[["trade_date", "up_limit", "down_limit"]],
+            on="trade_date",
+            how="left",
+            validate="one_to_one",
+        )
+
+    def fetch_open_dates(self, start_date: date, end_date: date) -> list[date]:
+        if end_date < start_date:
+            return []
+        frame = self._pro.trade_cal(
+            exchange="SSE",
+            start_date=start_date.strftime("%Y%m%d"),
+            end_date=end_date.strftime("%Y%m%d"),
+            is_open="1",
+            fields="cal_date,is_open",
+        )
+        if frame is None or frame.empty:
+            return []
+        return sorted(
+            pd.to_datetime(frame["cal_date"], format="%Y%m%d").dt.date.tolist()
+        )
+
+    def fetch_corporate_actions(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> pd.DataFrame:
+        """Return implemented cash/stock dividends by ex-date.
+
+        The paper ledger accrues both legs on the ex-date.  This is an
+        economic-return convention: it keeps the position value continuous
+        across the ex-date, while the recorded event still retains the actual
+        pay/list dates for audit purposes.
+        """
+        columns = [
+            "ts_code",
+            "end_date",
+            "ann_date",
+            "div_proc",
+            "stk_div",
+            "cash_div",
+            "cash_div_tax",
+            "record_date",
+            "ex_date",
+            "pay_date",
+            "div_listdate",
+            "imp_ann_date",
+        ]
+        if is_etf(symbol):
+            return pd.DataFrame(columns=columns)
+
+        cache_path = self._cache_path(
+            "corporate_actions",
+            symbol,
+            start_date,
+            end_date,
+        )
+        if cache_path.exists():
+            frame = pd.read_csv(cache_path, dtype=str)
+        else:
+            frame = self._pro.dividend(
+                ts_code=symbol,
+                fields=",".join(columns),
+            )
+            if frame is None:
+                frame = pd.DataFrame(columns=columns)
+            for column in columns:
+                if column not in frame.columns:
+                    frame[column] = None
+            frame = frame[columns]
+            self._write_cache(cache_path, frame)
+
+        if frame.empty:
+            return pd.DataFrame(columns=columns)
+        frame = frame.copy()
+        frame = frame[frame["div_proc"].astype(str).str.strip() == "实施"]
+        frame["ex_date"] = pd.to_datetime(
+            frame["ex_date"], format="%Y%m%d", errors="coerce"
+        )
+        frame = frame[
+            frame["ex_date"].between(
+                pd.Timestamp(start_date), pd.Timestamp(end_date), inclusive="both"
+            )
+        ]
+        for column in ("stk_div", "cash_div", "cash_div_tax"):
+            frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+        frame = (
+            frame.sort_values(["ex_date", "end_date", "imp_ann_date"])
+            .drop_duplicates(["ex_date", "end_date"], keep="last")
+            .reset_index(drop=True)
+        )
+        return frame
+
+    def fetch_corporate_actions_for_period(
+        self,
+        symbols: list[str],
+        start_date: date,
+        end_date: date,
+    ) -> pd.DataFrame:
+        """Fetch all implemented actions by ex-date, then filter the universe.
+
+        Tushare accepts ``ex_date`` as a query key, so catch-up processing costs
+        one request per trading day instead of one request per candidate symbol.
+        """
+        columns = [
+            "ts_code",
+            "end_date",
+            "ann_date",
+            "div_proc",
+            "stk_div",
+            "cash_div",
+            "cash_div_tax",
+            "record_date",
+            "ex_date",
+            "pay_date",
+            "div_listdate",
+            "imp_ann_date",
+        ]
+        wanted = {symbol for symbol in symbols if not is_etf(symbol)}
+        if not wanted:
+            return pd.DataFrame(columns=columns)
+
+        frames: list[pd.DataFrame] = []
+        for trade_date in self.fetch_open_dates(start_date, end_date):
+            cache_path = CACHE_DIR / f"corporate_actions_exdate_{trade_date:%Y%m%d}.csv"
+            if cache_path.exists():
+                frame = pd.read_csv(cache_path, dtype=str)
+            else:
+                frame = self._pro.dividend(
+                    ex_date=trade_date.strftime("%Y%m%d"),
+                    fields=",".join(columns),
+                )
+                if frame is None:
+                    frame = pd.DataFrame(columns=columns)
+                for column in columns:
+                    if column not in frame.columns:
+                        frame[column] = None
+                frame = frame[columns]
+                self._write_cache(cache_path, frame)
+            if not frame.empty:
+                frames.append(frame[frame["ts_code"].isin(wanted)].copy())
+
+        if not frames:
+            return pd.DataFrame(columns=columns)
+        result = pd.concat(frames, ignore_index=True)
+        result = result[result["div_proc"].astype(str).str.strip() == "实施"]
+        result["ex_date"] = pd.to_datetime(
+            result["ex_date"], format="%Y%m%d", errors="coerce"
+        )
+        for column in ("stk_div", "cash_div", "cash_div_tax"):
+            result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0.0)
+        return (
+            result.sort_values(["ex_date", "ts_code", "end_date", "imp_ann_date"])
+            .drop_duplicates(["ex_date", "ts_code", "end_date"], keep="last")
+            .reset_index(drop=True)
+        )
 
     def fetch_hourly_cached(
         self,
@@ -200,6 +410,46 @@ class TushareDataProvider:
             format="%Y%m%d",
         )
         return trade_date, snapshot, errors
+
+    def fetch_market_technical_breadth(
+        self,
+        trade_date: date,
+    ) -> dict[str, float | int | str]:
+        """Calculate whole-market medium-term breadth from point-in-time factors."""
+        cache_path = CACHE_DIR / f"market_technical_{trade_date:%Y%m%d}.csv"
+        if cache_path.exists():
+            frame = pd.read_csv(cache_path)
+        else:
+            frame = self._pro.stk_factor_pro(
+                trade_date=trade_date.strftime("%Y%m%d"),
+                fields="ts_code,trade_date,close_qfq,ma_qfq_20,ma_qfq_60",
+            )
+            if frame is None or frame.empty:
+                raise ValueError(f"stk_factor_pro 在 {trade_date} 没有返回数据")
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            frame.to_csv(cache_path, index=False, encoding="utf-8")
+
+        required = {"close_qfq", "ma_qfq_20", "ma_qfq_60"}
+        missing = sorted(required.difference(frame.columns))
+        if missing:
+            raise ValueError(f"stk_factor_pro 缺少字段：{', '.join(missing)}")
+        close = pd.to_numeric(frame["close_qfq"], errors="coerce")
+        ma20 = pd.to_numeric(frame["ma_qfq_20"], errors="coerce")
+        ma60 = pd.to_numeric(frame["ma_qfq_60"], errors="coerce")
+        valid20 = close.notna() & ma20.notna() & (ma20 > 0)
+        valid60 = close.notna() & ma60.notna() & (ma60 > 0)
+        total = max(len(frame), 1)
+        breadth20 = float((close[valid20] > ma20[valid20]).mean()) if valid20.any() else 0.0
+        breadth60 = float((close[valid60] > ma60[valid60]).mean()) if valid60.any() else 0.0
+        coverage = float(min(valid20.sum(), valid60.sum()) / total)
+        return {
+            "trade_date": trade_date.isoformat(),
+            "above_ma20": round(breadth20, 6),
+            "above_ma60": round(breadth60, 6),
+            "composite": round(breadth20 * 0.6 + breadth60 * 0.4, 6),
+            "coverage": round(coverage, 6),
+            "sample_size": int(len(frame)),
+        }
 
     def _fetch_stock_basic(self) -> pd.DataFrame:
         cache_path = CACHE_DIR / "stock_basic_listed.csv"

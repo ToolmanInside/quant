@@ -36,6 +36,20 @@ ACTION_NAMES = {
     "SELL": "卖出 / 减仓",
     "CLOSE": "平仓",
 }
+CONSTRAINT_NAMES = {
+    "limit_up_locked": "一字涨停，买入无法成交",
+    "limit_down_locked": "一字跌停，卖出无法成交",
+    "suspended_or_no_volume": "停牌或无成交量",
+    "invalid_open_quote": "开盘报价无效",
+    "price_limit_unavailable": "缺少当日涨跌停价",
+    "insufficient_cash": "可用现金不足",
+    "insufficient_cash_partial_fill": "现金不足，仅部分成交",
+    "board_lot_constraint": "不足一手，无法部分减仓",
+    "board_lot_or_already_at_target": "不足一手或已接近目标",
+    "missing_market_frame": "缺少行情序列",
+    "no_open_quote": "当日没有开盘报价",
+    "no_position_or_already_at_target": "无持仓或已达到目标",
+}
 
 
 @dataclass(frozen=True)
@@ -318,6 +332,37 @@ def _plan_lines(
     return lines
 
 
+def _execution_reconciliation_lines(dashboard: dict[str, Any]) -> list[str]:
+    journals = dashboard.get("daily_journals") or []
+    reconciliation = (
+        journals[0].get("review", {}).get("execution_reconciliation", [])
+        if journals
+        else []
+    )
+    if not reconciliation:
+        return ["- 今日没有到期交易计划。"]
+    lines: list[str] = []
+    for item in reconciliation:
+        status = (
+            "完成"
+            if float(item.get("fill_ratio", 0)) >= 1
+            else "部分成交"
+            if float(item.get("fill_ratio", 0)) > 0
+            else "未成交"
+        )
+        raw_constraint = item.get("constraint_reason")
+        constraint = CONSTRAINT_NAMES.get(raw_constraint, raw_constraint or "无")
+        warning_key = item.get("tradability_warning")
+        warning = CONSTRAINT_NAMES.get(warning_key, warning_key or "")
+        lines.append(
+            f"- `{item['symbol']}` {status}：计划 {int(item.get('planned_quantity', 0)):,} 股，"
+            f"实际 {int(item.get('actual_quantity', 0)):,} 股；"
+            f"实际仓位 {float(item.get('actual_weight', 0)):.1%}；约束 {constraint}"
+            f"{'；提示 ' + warning if warning else ''}。"
+        )
+    return lines
+
+
 def _market_research_lines(dashboard: dict[str, Any]) -> list[str]:
     research = (
         dashboard.get("market_research")
@@ -349,6 +394,15 @@ def _market_research_lines(dashboard: dict[str, Any]) -> list[str]:
             f"**{float(research.get('market_breadth', 0)):.1%}**。"
         ),
     ]
+    technical = research.get("technical_breadth") or {}
+    if technical:
+        lines.append(
+            "- 全市场中期趋势宽度："
+            f"20日 **{float(technical.get('above_ma20', 0)):.1%}**；"
+            f"60日 **{float(technical.get('above_ma60', 0)):.1%}**；"
+            f"组合 **{float(technical.get('composite', 0)):.1%}**；"
+            f"覆盖 {float(technical.get('coverage', 0)):.1%}。"
+        )
     sectors = research.get("top_sectors") or []
     if sectors:
         lines.append(
@@ -523,11 +577,20 @@ def build_markdown_report(
         f"#### 当前持仓（{len(dashboard.get('positions') or [])} 个）",
         *_holding_lines(dashboard, max_holdings),
         "",
+        "#### 今日计划执行核对",
+        *_execution_reconciliation_lines(dashboard),
+        "",
         "#### 今日分析",
         (
             f"- 市场状态：**{latest['market_regime']}**；"
             f"趋势宽度 {float(latest['breadth']):.1%}；"
-            f"数据完整度 {float(latest['data_quality']):.1%}"
+            f"数据完整度 {float(latest['data_quality']):.1%}；"
+            f"宽度口径 {latest.get('breadth_source', 'candidate_pool')}"
+        ),
+        (
+            f"- 风险目标仓位 {float(latest.get('requested_exposure', 0)):.1%}；"
+            f"已分配 {float(latest.get('allocated_exposure', 0)):.1%}；"
+            f"约束后现金缓冲 {float(latest.get('unallocated_exposure', 0)):.1%}。"
         ),
         f"- 优选板块：{sectors}",
         *(
@@ -737,6 +800,7 @@ def _active_market_universe(
     universe_config: MarketUniverseConfig,
     news_config: NewsResearchConfig,
     bocha_api_key: str,
+    include_news: bool = True,
 ) -> tuple[list[str], dict[str, Any] | None]:
     if universe_config.mode != "full_market":
         return list(config.symbols), None
@@ -751,12 +815,20 @@ def _active_market_universe(
         )
     try:
         result = research_full_market(provider, as_of_date, universe_config)
-        if news_config.enabled:
+        if news_config.enabled and include_news:
             result = enrich_with_bocha_news(
                 result,
                 bocha_api_key,
                 news_config,
             )
+        elif news_config.enabled:
+            result.summary["news"] = {
+                "enabled": False,
+                "provider": "bocha",
+                "sectors": [],
+                "stocks": [],
+                "errors": ["历史补算日不回看后来新闻，避免未来信息泄漏"],
+            }
         selected = [
             item["symbol"]
             for item in result.summary["candidates"]
@@ -880,29 +952,39 @@ def run_daily_job(
     provider = TushareDataProvider(tushare_token)
     store = PaperStore(state_path)
     try:
-        active_symbols, market_research_summary = _active_market_universe(
-            provider,
-            store,
-            config,
-            as_of_date,
-            universe_config,
-            news_config,
-            bocha_api_key,
-        )
-        effective_config = replace(config, symbols=active_symbols)
         account = store.account(config.account_id)
         configuration_changed = (
             account is not None and _configuration_changed(account, config)
+        )
+        state_upgrade_required = bool(
+            account and account.get("requires_reinitialize_reason")
         )
         should_reinitialize = (
             account is None
             or force_reinitialize
             or (configuration_changed and reinitialize_on_config_change)
+            or (state_upgrade_required and reinitialize_on_config_change)
         )
+        if should_reinitialize or config.universe_mode != "full_market":
+            active_symbols, market_research_summary = _active_market_universe(
+                provider,
+                store,
+                config,
+                as_of_date,
+                universe_config,
+                news_config,
+                bocha_api_key,
+            )
+        else:
+            # Existing full-market accounts rebuild each missing date below.
+            # Avoid querying today's snapshot/news before that chronological loop.
+            active_symbols = list(config.symbols)
+            market_research_summary = None
+        effective_config = replace(config, symbols=active_symbols)
         if should_reinitialize:
-            if configuration_changed and not force_reinitialize:
+            if (configuration_changed or state_upgrade_required) and not force_reinitialize:
                 LOGGER.warning(
-                    "检测到账户关键配置变化，自动重建账户 %s",
+                    "检测到账户配置或账本引擎升级，自动重建账户 %s",
                     config.account_id,
                 )
             LOGGER.info(
@@ -986,44 +1068,118 @@ def run_daily_job(
                     store,
                 )
         else:
-            if configuration_changed:
+            if configuration_changed or state_upgrade_required:
                 raise ValueError(
-                    "仓库配置与持久化模拟账户不一致。"
+                    "仓库配置、账本引擎与持久化模拟账户不一致。"
                     "请手动运行工作流并启用 force_reinitialize 以重建账户。"
                 )
 
-            _persist_research_context(
-                store,
-                effective_config,
-                active_symbols,
-                market_research_summary,
-            )
-            LOGGER.info(
-                "更新模拟账户 %s 到 %s；详细候选池 %s 只",
-                config.account_id,
-                as_of_date,
-                len(active_symbols),
-            )
-            result = advance_paper_simulation(
-                PaperAdvanceRequest(
-                    account_id=config.account_id,
-                    symbols=effective_config.symbols,
-                    as_of_date=as_of_date,
-                ),
-                provider,
-                store,
-            )
+            account = store.account(config.account_id) or {}
+            last_date_text = account.get("last_date")
+            open_dates: list[date] = []
+            if config.universe_mode == "full_market" and last_date_text:
+                open_dates = provider.fetch_open_dates(
+                    date.fromisoformat(last_date_text) + timedelta(days=1),
+                    as_of_date,
+                )
+
+            if open_dates:
+                total_processed = 0
+                researched_days = 0
+                combined_errors: list[dict[str, str]] = []
+                result = {}
+                for index, replay_date in enumerate(open_dates):
+                    active_symbols, market_research_summary = (
+                        _active_market_universe(
+                            provider,
+                            store,
+                            config,
+                            replay_date,
+                            universe_config,
+                            news_config,
+                            bocha_api_key,
+                            include_news=index == len(open_dates) - 1,
+                        )
+                    )
+                    if (
+                        market_research_summary
+                        and market_research_summary.get("mode") == "full_market"
+                        and market_research_summary.get("trade_date")
+                        != replay_date.isoformat()
+                    ):
+                        market_research_summary["warnings"].append(
+                            f"{replay_date} 收盘数据尚未完整发布，逐日补算在此停止。"
+                        )
+                        break
+                    effective_config = replace(config, symbols=active_symbols)
+                    _persist_research_context(
+                        store,
+                        effective_config,
+                        active_symbols,
+                        market_research_summary,
+                    )
+                    LOGGER.info(
+                        "逐日重建 %s 的全市场截面；详细候选池 %s 只",
+                        replay_date,
+                        len(active_symbols),
+                    )
+                    result = advance_paper_simulation(
+                        PaperAdvanceRequest(
+                            account_id=config.account_id,
+                            symbols=effective_config.symbols,
+                            as_of_date=replay_date,
+                        ),
+                        provider,
+                        store,
+                    )
+                    metadata = result.get("run") or {}
+                    total_processed += int(metadata.get("processed_days", 0))
+                    researched_days += 1
+                    combined_errors.extend(metadata.get("data_errors") or [])
+                result["run"] = {
+                    **(result.get("run") or {}),
+                    "processed_days": total_processed,
+                    "data_errors": combined_errors,
+                    "point_in_time_research_days": researched_days,
+                    "message": f"已逐日重建并处理 {total_processed} 个新交易日。",
+                }
+            else:
+                if config.universe_mode == "full_market":
+                    active_symbols, market_research_summary = (
+                        _active_market_universe(
+                            provider,
+                            store,
+                            config,
+                            as_of_date,
+                            universe_config,
+                            news_config,
+                            bocha_api_key,
+                        )
+                    )
+                    effective_config = replace(config, symbols=active_symbols)
+                _persist_research_context(
+                    store,
+                    effective_config,
+                    active_symbols,
+                    market_research_summary,
+                )
+                LOGGER.info(
+                    "更新模拟账户 %s 到 %s；详细候选池 %s 只",
+                    config.account_id,
+                    as_of_date,
+                    len(active_symbols),
+                )
+                result = advance_paper_simulation(
+                    PaperAdvanceRequest(
+                        account_id=config.account_id,
+                        symbols=effective_config.symbols,
+                        as_of_date=as_of_date,
+                    ),
+                    provider,
+                    store,
+                )
 
         run_metadata = result.get("run") or {}
-        if (
-            market_research_summary is not None
-            and market_research_summary.get("mode") == "full_market"
-            and int(run_metadata.get("processed_days", 0)) > 1
-        ):
-            market_research_summary["warnings"].append(
-                "本次补算了多个遗漏交易日；最终计划使用最新全市场截面，"
-                "中间日期没有逐日重建完整横截面，不应用于严格历史绩效评价。"
-            )
         _persist_research_context(
             store,
             effective_config,

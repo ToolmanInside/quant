@@ -241,3 +241,100 @@ def test_changed_account_config_is_reinitialized_automatically(
     assert result == {"reinitialized": True}
     assert captured["request"].initial_cash == 100_000
     assert captured["request"].backtest_start_date == date(2023, 1, 1)
+
+
+def test_full_market_catch_up_rebuilds_each_date_in_order(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    state_path = tmp_path / "account.txt"
+    config = JobConfig(
+        account_id="github-actions",
+        strategy_id="moving_average",
+        frequency="1d",
+        universe_mode="full_market",
+        symbols=["000001.SZ", "000002.SZ", "000003.SZ", "600001.SH", "600002.SH"],
+        backtest_start_date=date(2024, 1, 1),
+        backtest_end_date=date(2025, 12, 31),
+        simulation_start_date=date(2026, 1, 1),
+        initial_cash=100_000,
+    )
+    store = PaperStore(state_path)
+    store.reset_account(
+        config.account_id,
+        config.initial_cash,
+        config.symbols,
+        "v1.0-balanced",
+        {
+            "strategy_id": config.strategy_id,
+            "frequency": config.frequency,
+            "universe_mode": config.universe_mode,
+            "backtest_start_date": config.backtest_start_date.isoformat(),
+            "backtest_end_date": config.backtest_end_date.isoformat(),
+            "simulation_start_date": config.simulation_start_date.isoformat(),
+        },
+    )
+    account = store.account(config.account_id)
+    assert account is not None
+    account["last_date"] = "2026-07-28"
+    store.save_account(account)
+    store.close()
+
+    class FakeMarketProvider:
+        def fetch_open_dates(self, start_date, end_date):
+            return [date(2026, 7, day) for day in (29, 30, 31)]
+
+    monkeypatch.setattr(
+        daily_job,
+        "TushareDataProvider",
+        lambda token: FakeMarketProvider(),
+    )
+    research_calls: list[tuple[date, bool]] = []
+
+    def fake_active(
+        provider,
+        active_store,
+        active_config,
+        as_of_date,
+        universe_config,
+        news_config,
+        bocha_api_key,
+        include_news=True,
+    ):
+        research_calls.append((as_of_date, include_news))
+        return active_config.symbols, {
+            "mode": "full_market",
+            "trade_date": as_of_date.isoformat(),
+            "candidates": [],
+            "warnings": [],
+        }
+
+    advance_calls: list[date] = []
+
+    def fake_advance(request, provider, active_store):
+        advance_calls.append(request.as_of_date)
+        active_account = active_store.account(request.account_id)
+        assert active_account is not None
+        active_account["last_date"] = request.as_of_date.isoformat()
+        active_store.save_account(active_account)
+        return {"run": {"processed_days": 1, "data_errors": []}}
+
+    monkeypatch.setattr(daily_job, "_active_market_universe", fake_active)
+    monkeypatch.setattr(daily_job, "advance_paper_simulation", fake_advance)
+
+    result = run_daily_job(
+        config,
+        state_path=state_path,
+        as_of_date=date(2026, 7, 31),
+        tushare_token="test-token",
+        market_universe=daily_job.MarketUniverseConfig(mode="full_market"),
+    )
+
+    assert advance_calls == [date(2026, 7, day) for day in (29, 30, 31)]
+    assert research_calls == [
+        (date(2026, 7, 29), False),
+        (date(2026, 7, 30), False),
+        (date(2026, 7, 31), True),
+    ]
+    assert result["run"]["processed_days"] == 3
+    assert result["run"]["point_in_time_research_days"] == 3

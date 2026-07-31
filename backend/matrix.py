@@ -173,6 +173,8 @@ def _simulate(
     trade_count = 0
     total_cost = 0.0
     equity_values: list[float] = []
+    invested_values: list[bool] = []
+    trade_times: list[pd.Timestamp] = []
     slippage = costs.slippage_bps / 10_000
 
     for row in data.itertuples(index=False):
@@ -197,6 +199,7 @@ def _simulate(
                 buy_date = current_time.normalize()
                 total_cost += commission + candidate * open_price * slippage
                 trade_count += 1
+                trade_times.append(current_time)
 
         elif (
             not target_long
@@ -213,15 +216,31 @@ def _simulate(
             shares = 0
             buy_date = None
             trade_count += 1
+            trade_times.append(current_time)
 
         equity_values.append(cash + shares * float(row.adj_close))
+        invested_values.append(shares > 0)
 
     equity = pd.Series(equity_values, index=pd.DatetimeIndex(data["trade_date"]))
     split_index = max(int(len(equity) * 0.7), 1)
     out_of_sample = equity.iloc[split_index:]
+    oos_start = pd.Timestamp(data["trade_date"].iloc[split_index])
+    oos_invested = pd.Series(
+        invested_values[split_index:],
+        index=pd.DatetimeIndex(data["trade_date"].iloc[split_index:]),
+        dtype=bool,
+    )
+    oos_monthly_active = oos_invested.groupby(oos_invested.index.to_period("M")).any()
     result = _metrics(equity)
     result["oos"] = _metrics(out_of_sample)
     result["trade_count"] = trade_count
+    result["oos_trade_count"] = sum(time >= oos_start for time in trade_times)
+    result["oos_active_day_coverage"] = (
+        float(oos_invested.mean()) if len(oos_invested) else 0.0
+    )
+    result["oos_active_month_coverage"] = (
+        float(oos_monthly_active.mean()) if len(oos_monthly_active) else 0.0
+    )
     result["total_cost"] = total_cost
     result["cost_rate"] = total_cost / costs.initial_cash
     return result
@@ -238,12 +257,14 @@ def _score_rows(rows: list[dict]) -> None:
         return
     table = pd.DataFrame(available)
     components = {
-        "oos_sharpe": (0.30, True),
+        "oos_sharpe": (0.25, True),
         "oos_calmar": (0.15, True),
-        "median_sharpe": (0.15, True),
+        "oos_positive_rate": (0.10, True),
+        "median_oos_active_month_coverage": (0.05, True),
+        "median_oos_trade_count": (0.05, True),
+        "median_sharpe": (0.10, True),
         "median_annualized_return": (0.10, True),
         "median_max_drawdown": (0.10, True),
-        "positive_rate": (0.10, True),
         "median_cost_rate": (0.05, False),
         "coverage": (0.05, True),
     }
@@ -251,8 +272,8 @@ def _score_rows(rows: list[dict]) -> None:
     for column, (weight, higher_is_better) in components.items():
         scores += _percentile(table[column], higher_is_better) * weight * 100
 
-    low_trade_penalty = table["median_trade_count"].apply(
-        lambda count: 0.8 if count < 4 else 1.0
+    low_trade_penalty = table["median_oos_trade_count"].apply(
+        lambda count: 0.8 if count < 2 else 1.0
     )
     scores *= low_trade_penalty
     for index, row in enumerate(available):
@@ -294,6 +315,14 @@ def _aggregate_cell(
         "median_calmar": float(frame["calmar"].median()),
         "oos_sharpe": float(frame["oos_sharpe"].median()),
         "oos_calmar": float(frame["oos_calmar"].median()),
+        "oos_positive_rate": float((frame["oos_total_return"] > 0).mean()),
+        "median_oos_trade_count": float(frame["oos_trade_count"].median()),
+        "median_oos_active_day_coverage": float(
+            frame["oos_active_day_coverage"].median()
+        ),
+        "median_oos_active_month_coverage": float(
+            frame["oos_active_month_coverage"].median()
+        ),
         "positive_rate": float((frame["total_return"] > 0).mean()),
         "median_trade_count": float(frame["trade_count"].median()),
         "median_cost_rate": float(frame["cost_rate"].median()),
@@ -382,6 +411,14 @@ def run_strategy_matrix(
                             "calmar": metrics["calmar"],
                             "oos_sharpe": metrics["oos"]["sharpe"],
                             "oos_calmar": metrics["oos"]["calmar"],
+                            "oos_total_return": metrics["oos"]["total_return"],
+                            "oos_trade_count": metrics["oos_trade_count"],
+                            "oos_active_day_coverage": metrics[
+                                "oos_active_day_coverage"
+                            ],
+                            "oos_active_month_coverage": metrics[
+                                "oos_active_month_coverage"
+                            ],
                             "trade_count": metrics["trade_count"],
                             "cost_rate": metrics["cost_rate"],
                         }
@@ -442,9 +479,9 @@ def run_strategy_matrix(
                 "rsi_reversion": "RSI(14)<30入场，RSI>55离场",
             },
             "score": (
-                "相对评分：样本外夏普30%、样本外Calmar15%、全样本夏普15%、"
-                "年化收益10%、最大回撤10%、盈利标的比例10%、成本5%、覆盖率5%；"
-                "中位交易少于4笔乘0.8"
+                "相对评分：样本外夏普25%、样本外Calmar15%、样本外盈利标的10%、"
+                "样本外活跃月份5%、样本外交易数5%、全样本夏普10%、年化收益10%、最大回撤10%、"
+                "成本5%、标的覆盖率5%；样本外中位交易少于2笔乘0.8"
             ),
             "out_of_sample": "按时间顺序最后30%作为样本外区间，参数未针对标的优化",
             "costs": {

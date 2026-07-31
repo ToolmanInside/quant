@@ -116,6 +116,123 @@ def _load_frames(
     return frames, errors
 
 
+def _load_corporate_actions(
+    provider: TushareDataProvider,
+    symbols: list[str],
+    start_date: date,
+    end_date: date,
+) -> tuple[dict[pd.Timestamp, list[dict[str, Any]]], list[dict[str, str]]]:
+    """Load point-in-time corporate actions when the provider supports them."""
+    fetcher = getattr(provider, "fetch_corporate_actions", None)
+    if not callable(fetcher):
+        return {}, []
+    by_date: dict[pd.Timestamp, list[dict[str, Any]]] = {}
+    errors: list[dict[str, str]] = []
+    for symbol in symbols:
+        try:
+            frame = fetcher(symbol, start_date, end_date)
+            for _, row in frame.iterrows():
+                ex_date = pd.Timestamp(row["ex_date"]).normalize()
+                by_date.setdefault(ex_date, []).append(
+                    {
+                        "symbol": symbol,
+                        "end_date": str(row.get("end_date") or ""),
+                        "record_date": str(row.get("record_date") or ""),
+                        "pay_date": str(row.get("pay_date") or ""),
+                        "div_listdate": str(row.get("div_listdate") or ""),
+                        "stock_dividend_per_share": float(row.get("stk_div") or 0),
+                        "cash_dividend_per_share": float(row.get("cash_div") or 0),
+                    }
+                )
+        except Exception as exc:
+            logger.exception("Corporate action data failed for %s", symbol)
+            errors.append({"symbol": symbol, "message": str(exc)})
+    return by_date, errors
+
+
+def _load_corporate_actions_for_universe(
+    provider: TushareDataProvider,
+    symbols: list[str],
+    start_date: date,
+    end_date: date,
+) -> tuple[dict[pd.Timestamp, list[dict[str, Any]]], list[dict[str, str]]]:
+    """Load every candidate's actions for catch-up, preferably by ex-date."""
+    fetcher = getattr(provider, "fetch_corporate_actions_for_period", None)
+    if not callable(fetcher):
+        return _load_corporate_actions(provider, symbols, start_date, end_date)
+    try:
+        frame = fetcher(symbols, start_date, end_date)
+        by_date: dict[pd.Timestamp, list[dict[str, Any]]] = {}
+        for _, row in frame.iterrows():
+            ex_date = pd.Timestamp(row["ex_date"]).normalize()
+            by_date.setdefault(ex_date, []).append(
+                {
+                    "symbol": str(row["ts_code"]),
+                    "end_date": str(row.get("end_date") or ""),
+                    "record_date": str(row.get("record_date") or ""),
+                    "pay_date": str(row.get("pay_date") or ""),
+                    "div_listdate": str(row.get("div_listdate") or ""),
+                    "stock_dividend_per_share": float(row.get("stk_div") or 0),
+                    "cash_dividend_per_share": float(row.get("cash_div") or 0),
+                }
+            )
+        return by_date, []
+    except Exception as exc:
+        logger.exception("Bulk corporate action data failed")
+        return {}, [{"symbol": "*", "message": str(exc)}]
+
+
+def _apply_corporate_actions(
+    account: dict[str, Any],
+    positions: dict[str, dict[str, Any]],
+    trade_date: pd.Timestamp,
+    actions: list[dict[str, Any]],
+    store: PaperStore,
+) -> list[dict[str, Any]]:
+    """Accrue held-position distributions before ex-date opening trades."""
+    applied: list[dict[str, Any]] = []
+    for source in actions:
+        symbol = source["symbol"]
+        position = positions.get(symbol)
+        if not position or int(position["shares"]) <= 0:
+            continue
+        shares_before = int(position["shares"])
+        stock_rate = max(float(source.get("stock_dividend_per_share", 0)), 0.0)
+        cash_rate = max(float(source.get("cash_dividend_per_share", 0)), 0.0)
+        shares_added = int(round(shares_before * stock_rate))
+        cash_accrued = round(shares_before * cash_rate, 2)
+        if shares_added <= 0 and cash_accrued <= 0:
+            continue
+
+        basis_before = float(
+            position.get(
+                "cost_basis_total",
+                float(position["avg_price"]) * shares_before,
+            )
+        )
+        position["shares"] = shares_before + shares_added
+        position["cost_basis_total"] = max(basis_before - cash_accrued, 0.0)
+        if position["shares"] > 0:
+            position["avg_price"] = (
+                position["cost_basis_total"] / position["shares"]
+            )
+        account["cash"] += cash_accrued
+        event = {
+            **source,
+            "trade_date": trade_date.date().isoformat(),
+            "shares_before": shares_before,
+            "shares_added": shares_added,
+            "shares_after": int(position["shares"]),
+            "cash_accrued": cash_accrued,
+            "basis_before": round(basis_before, 4),
+            "basis_after": round(float(position["cost_basis_total"]), 4),
+            "accounting_timing": "ex_date_economic_accrual",
+        }
+        store.add_corporate_action(account["account_id"], event)
+        applied.append(event)
+    return applied
+
+
 def _calendar(frames: dict[str, pd.DataFrame]) -> list[pd.Timestamp]:
     counts: dict[pd.Timestamp, int] = {}
     for frame in frames.values():
@@ -220,6 +337,43 @@ def _rank(series: pd.Series) -> pd.Series:
     return series.rank(method="average", pct=True)
 
 
+def _allocate_capped_weights(
+    raw_scores: dict[str, float],
+    target_exposure: float,
+    position_cap: float,
+) -> dict[str, float]:
+    """Water-fill weights so a cap does not silently destroy exposure."""
+    scores = {
+        symbol: max(float(score), 0.0)
+        for symbol, score in raw_scores.items()
+        if np.isfinite(float(score)) and float(score) > 0
+    }
+    if not scores or target_exposure <= 0 or position_cap <= 0:
+        return {}
+    remaining = min(float(target_exposure), len(scores) * float(position_cap))
+    active = dict(scores)
+    allocated: dict[str, float] = {}
+    while active and remaining > 1e-12:
+        total_score = sum(active.values())
+        proposed = {
+            symbol: remaining * score / total_score
+            for symbol, score in active.items()
+        }
+        capped = [
+            symbol
+            for symbol, weight in proposed.items()
+            if weight > position_cap + 1e-12
+        ]
+        if not capped:
+            allocated.update(proposed)
+            break
+        for symbol in capped:
+            allocated[symbol] = float(position_cap)
+            remaining -= float(position_cap)
+            active.pop(symbol)
+    return allocated
+
+
 def _analyze(
     trade_date: pd.Timestamp,
     frames: dict[str, pd.DataFrame],
@@ -228,6 +382,7 @@ def _analyze(
     positions: dict[str, dict[str, Any]],
     equity: float,
     strategy_id: str,
+    market_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     feature_rows: list[dict[str, Any]] = []
     for symbol, frame in frames.items():
@@ -264,9 +419,15 @@ def _analyze(
             "selected_symbols": [],
             "top_sectors": [],
             "breadth": 0.0,
+            "candidate_breadth": 0.0,
+            "breadth_source": "candidate_pool",
             "market_regime": "数据不足",
             "data_quality": data_quality,
             "features": {},
+            "requested_exposure": 0.0,
+            "allocated_exposure": 0.0,
+            "unallocated_exposure": 0.0,
+            "exposure_constraint": "no_usable_features",
         }
 
     table = pd.DataFrame(feature_rows).set_index("symbol")
@@ -321,7 +482,19 @@ def _analyze(
         & ~table["name"].str.upper().str.contains("ST", regex=False)
     )
 
-    breadth = float((table["adj_close"] > table["slow_ma"]).mean())
+    candidate_breadth = float((table["adj_close"] > table["slow_ma"]).mean())
+    breadth = candidate_breadth
+    breadth_source = "candidate_pool"
+    technical_breadth = (market_context or {}).get("technical_breadth") or {}
+    external_coverage = float(technical_breadth.get("coverage") or 0)
+    external_breadth = technical_breadth.get("composite")
+    if (
+        external_breadth is not None
+        and np.isfinite(float(external_breadth))
+        and external_coverage >= 0.50
+    ):
+        breadth = float(external_breadth)
+        breadth_source = "full_market_ma20_ma60"
     median_momentum = float(table["momentum_short"].median())
     if breadth >= params["breadth_full"] and median_momentum > -0.01:
         market_regime = "进攻"
@@ -369,14 +542,24 @@ def _analyze(
 
     target_weights: dict[str, float] = {}
     if exposure > 0 and selected:
-        inverse_volatility = pd.Series(
-            {symbol: 1 / float(table.loc[symbol, "volatility"]) for symbol in selected}
-        )
-        raw_weights = inverse_volatility / inverse_volatility.sum() * exposure
-        target_weights = {
-            symbol: float(min(weight, params["max_position_weight"]))
-            for symbol, weight in raw_weights.items()
+        inverse_volatility = {
+            symbol: 1 / float(table.loc[symbol, "volatility"])
+            for symbol in selected
         }
+        target_weights = _allocate_capped_weights(
+            inverse_volatility,
+            exposure,
+            params["max_position_weight"],
+        )
+    allocated_exposure = float(sum(target_weights.values()))
+    unallocated_exposure = max(float(exposure) - allocated_exposure, 0.0)
+    exposure_constraint = (
+        "position_count_times_cap"
+        if unallocated_exposure > 1e-8 and selected
+        else "no_eligible_symbols"
+        if unallocated_exposure > 1e-8
+        else None
+    )
 
     current_weights: dict[str, float] = {}
     for symbol, position in positions.items():
@@ -396,7 +579,12 @@ def _analyze(
         hard_stop = False
         stop_reason = ""
         if position and feature is not None:
-            position_return = float(feature["raw_close"]) / position["avg_price"] - 1
+            economic_basis = float(position.get("avg_price", 0))
+            position_return = (
+                float(feature["raw_close"]) / economic_basis - 1
+                if economic_basis > 0
+                else float("inf")
+            )
             if position_return <= -params["stop_loss"]:
                 hard_stop = True
                 stop_reason = f"持仓亏损 {position_return:.1%} 触发止损"
@@ -468,14 +656,36 @@ def _analyze(
         "selected_symbols": selected,
         "top_sectors": top_sectors,
         "breadth": breadth,
+        "candidate_breadth": candidate_breadth,
+        "breadth_source": breadth_source,
         "market_regime": market_regime,
         "data_quality": data_quality,
         "features": table.to_dict(orient="index"),
+        "requested_exposure": float(exposure),
+        "allocated_exposure": allocated_exposure,
+        "unallocated_exposure": unallocated_exposure,
+        "exposure_constraint": exposure_constraint,
     }
 
 
 def _commission(gross: float, costs: PaperCosts) -> float:
     return max(costs.minimum_commission, gross * costs.commission_rate)
+
+
+def _same_market_price(left: float, right: float) -> bool:
+    return (
+        math.isfinite(left)
+        and math.isfinite(right)
+        and abs(left - right) <= 0.0051
+    )
+
+
+def _optional_market_float(value: Any) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return result
 
 
 def _portfolio_value(
@@ -504,10 +714,10 @@ def _execute_pending(
     industries: dict[str, dict[str, str]],
     store: PaperStore,
     costs: PaperCosts,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     plan = account.get("pending_plan", [])
     if not plan:
-        return []
+        return [], []
 
     equity_open, _, _ = _portfolio_value(
         trade_date,
@@ -517,6 +727,7 @@ def _execute_pending(
         "open",
     )
     executions: list[dict[str, Any]] = []
+    outcomes: list[dict[str, Any]] = []
     ordered_plan = sorted(
         plan,
         key=lambda item: 0 if item["action"] in ("CLOSE", "SELL") else 1,
@@ -525,12 +736,46 @@ def _execute_pending(
 
     for item in ordered_plan:
         symbol = item["symbol"]
+        outcome = {
+            "symbol": symbol,
+            "action": item["action"],
+            "target_weight": float(item.get("target_weight", 0)),
+            "before_shares": int(positions.get(symbol, {}).get("shares", 0)),
+            "target_shares": 0,
+            "planned_quantity": 0,
+            "actual_quantity": 0,
+            "after_shares": int(positions.get(symbol, {}).get("shares", 0)),
+            "fill_ratio": 0.0,
+            "constraint_reason": None,
+            "tradability_warning": None,
+        }
         if symbol not in frames:
+            outcome["constraint_reason"] = "missing_market_frame"
+            outcomes.append(outcome)
             continue
         row = _row_on(frames[symbol], trade_date)
         if row is None:
+            outcome["constraint_reason"] = "no_open_quote"
+            outcomes.append(outcome)
             continue
         raw_open = float(row["open"])
+        raw_high = float(row["high"])
+        raw_low = float(row["low"])
+        if not math.isfinite(raw_open) or raw_open <= 0:
+            outcome["constraint_reason"] = "invalid_open_quote"
+            outcomes.append(outcome)
+            continue
+        volume = _optional_market_float(row.get("volume", 0))
+        up_limit = _optional_market_float(row.get("up_limit"))
+        down_limit = _optional_market_float(row.get("down_limit"))
+        limit_fields_present = {"up_limit", "down_limit"}.issubset(row.index)
+        limit_check_available = math.isfinite(up_limit) and math.isfinite(down_limit)
+        outcome["up_limit"] = round(up_limit, 4) if math.isfinite(up_limit) else None
+        outcome["down_limit"] = (
+            round(down_limit, 4) if math.isfinite(down_limit) else None
+        )
+        if not limit_check_available:
+            outcome["tradability_warning"] = "price_limit_unavailable"
         current = positions.get(symbol)
         current_shares = int(current["shares"]) if current else 0
         target_shares = (
@@ -538,6 +783,7 @@ def _execute_pending(
             if item["target_weight"] > 0
             else 0
         )
+        outcome["target_shares"] = target_shares
 
         if item["action"] in ("CLOSE", "SELL"):
             quantity = (
@@ -546,9 +792,36 @@ def _execute_pending(
                 else max(current_shares - target_shares, 0)
             )
             quantity = min(quantity, current_shares)
-            if quantity < 100:
+            outcome["planned_quantity"] = quantity
+            if quantity <= 0:
+                outcome["constraint_reason"] = "no_position_or_already_at_target"
+                outcomes.append(outcome)
+                continue
+            # An odd-lot residual may be sold only as a complete close.  A
+            # maintenance SELL below one board lot is retained and disclosed.
+            if item["action"] == "SELL" and quantity < 100:
+                outcome["constraint_reason"] = "board_lot_constraint"
+                outcomes.append(outcome)
+                continue
+            if limit_fields_present and not limit_check_available:
+                outcome["constraint_reason"] = "price_limit_unavailable"
+                outcomes.append(outcome)
+                continue
+            if not math.isfinite(volume) or volume <= 0:
+                outcome["constraint_reason"] = "suspended_or_no_volume"
+                outcomes.append(outcome)
+                continue
+            locked_down = limit_check_available and all(
+                _same_market_price(price, down_limit)
+                for price in (raw_open, raw_high, raw_low)
+            )
+            if locked_down:
+                outcome["constraint_reason"] = "limit_down_locked"
+                outcomes.append(outcome)
                 continue
             execution_price = raw_open * (1 - slippage_rate)
+            if math.isfinite(down_limit):
+                execution_price = max(execution_price, down_limit)
             gross = quantity * execution_price
             commission = _commission(gross, costs)
             tax = 0.0 if is_etf(symbol) else gross * costs.stamp_tax_rate
@@ -558,12 +831,46 @@ def _execute_pending(
             if remaining <= 0:
                 positions.pop(symbol, None)
             else:
+                basis_before = float(
+                    current.get(
+                        "cost_basis_total",
+                        float(current["avg_price"]) * current_shares,
+                    )
+                )
+                current["cost_basis_total"] = (
+                    basis_before * remaining / current_shares
+                )
                 current["shares"] = remaining
+                current["avg_price"] = current["cost_basis_total"] / remaining
             action = "CLOSE" if remaining <= 0 else "SELL"
         else:
-            quantity = max(target_shares - current_shares, 0)
-            quantity = int(quantity / 100) * 100
+            requested_quantity = max(target_shares - current_shares, 0)
+            quantity = int(requested_quantity / 100) * 100
+            outcome["planned_quantity"] = quantity
+            if quantity < 100:
+                outcome["constraint_reason"] = "board_lot_or_already_at_target"
+                outcomes.append(outcome)
+                continue
+            planned_quantity = quantity
+            if limit_fields_present and not limit_check_available:
+                outcome["constraint_reason"] = "price_limit_unavailable"
+                outcomes.append(outcome)
+                continue
+            if not math.isfinite(volume) or volume <= 0:
+                outcome["constraint_reason"] = "suspended_or_no_volume"
+                outcomes.append(outcome)
+                continue
+            locked_up = limit_check_available and all(
+                _same_market_price(price, up_limit)
+                for price in (raw_open, raw_high, raw_low)
+            )
+            if locked_up:
+                outcome["constraint_reason"] = "limit_up_locked"
+                outcomes.append(outcome)
+                continue
             execution_price = raw_open * (1 + slippage_rate)
+            if math.isfinite(up_limit):
+                execution_price = min(execution_price, up_limit)
             while quantity >= 100:
                 gross = quantity * execution_price
                 commission = _commission(gross, costs)
@@ -571,6 +878,8 @@ def _execute_pending(
                     break
                 quantity -= 100
             if quantity < 100:
+                outcome["constraint_reason"] = "insufficient_cash"
+                outcomes.append(outcome)
                 continue
             gross = quantity * execution_price
             commission = _commission(gross, costs)
@@ -580,9 +889,13 @@ def _execute_pending(
             industry = industries.get(symbol, {})
             if current:
                 total_shares = current_shares + quantity
-                current["avg_price"] = (
-                    current["avg_price"] * current_shares + gross
-                ) / total_shares
+                current["cost_basis_total"] = float(
+                    current.get(
+                        "cost_basis_total",
+                        float(current["avg_price"]) * current_shares,
+                    )
+                ) + gross
+                current["avg_price"] = current["cost_basis_total"] / total_shares
                 current["shares"] = total_shares
             else:
                 positions[symbol] = {
@@ -592,9 +905,12 @@ def _execute_pending(
                     or "未分类",
                     "shares": quantity,
                     "avg_price": execution_price,
+                    "cost_basis_total": gross,
                     "entry_date": trade_date.date().isoformat(),
                 }
             action = "BUY"
+            if quantity < planned_quantity:
+                outcome["constraint_reason"] = "insufficient_cash_partial_fill"
 
         execution = {
             "trade_date": trade_date.date().isoformat(),
@@ -614,10 +930,47 @@ def _execute_pending(
                 account["current_version"],
             ),
             "signal_price": item.get("signal_price", 0),
+            "target_weight": float(item.get("target_weight", 0)),
+            "equity_open": round(equity_open, 2),
+            "target_shares": target_shares,
+            "before_shares": current_shares,
+            "after_shares": int(positions.get(symbol, {}).get("shares", 0)),
+            "up_limit": outcome["up_limit"],
+            "down_limit": outcome["down_limit"],
+            "tradability_warning": outcome["tradability_warning"],
         }
         store.add_execution(account["account_id"], execution)
         executions.append(execution)
-    return executions
+        outcome["actual_quantity"] = quantity
+        outcome["after_shares"] = execution["after_shares"]
+        outcome["fill_ratio"] = (
+            round(quantity / outcome["planned_quantity"], 6)
+            if outcome["planned_quantity"] > 0
+            else 1.0
+        )
+        outcomes.append(outcome)
+
+    post_equity, _, _ = _portfolio_value(
+        trade_date,
+        account["cash"],
+        positions,
+        frames,
+        "open",
+    )
+    for outcome in outcomes:
+        symbol = outcome["symbol"]
+        position = positions.get(symbol)
+        row = _row_on(frames[symbol], trade_date) if symbol in frames else None
+        actual_weight = (
+            int(position["shares"]) * float(row["open"]) / post_equity
+            if position and row is not None and post_equity > 0
+            else 0.0
+        )
+        outcome["actual_weight"] = round(actual_weight, 6)
+        outcome["allocation_gap"] = round(
+            actual_weight - float(outcome["target_weight"]), 6
+        )
+    return executions, outcomes
 
 
 def _reviews_for_day(
@@ -714,10 +1067,22 @@ def _build_daily_journal(
     next_plan: list[dict[str, Any]],
     positions: dict[str, dict[str, Any]],
     failed_symbols: int,
+    corporate_actions: list[dict[str, Any]] | None = None,
+    execution_reconciliation: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    scheduled_symbols = {item["symbol"] for item in due_plan}
-    executed_symbols = {item["symbol"] for item in executions}
-    unfilled_symbols = sorted(scheduled_symbols - executed_symbols)
+    reconciliation = list(execution_reconciliation or [])
+    unfilled_symbols = sorted(
+        item["symbol"]
+        for item in reconciliation
+        if int(item.get("actual_quantity", 0)) <= 0
+        and item.get("constraint_reason")
+        not in (None, "no_position_or_already_at_target")
+    )
+    partial_symbols = sorted(
+        item["symbol"]
+        for item in reconciliation
+        if 0 < float(item.get("fill_ratio", 0)) < 1
+    )
     large_gaps = [
         {
             "symbol": item["symbol"],
@@ -736,11 +1101,12 @@ def _build_daily_journal(
             f"异常或缺失标的 {failed_symbols} 个",
         ]
         next_focus = "补齐行情、复权和行业分类后再判断策略是否失效。"
-    elif unfilled_symbols or large_gaps:
+    elif unfilled_symbols or partial_symbols or large_gaps:
         category = "EXECUTION"
         conclusion = "计划与实际成交存在偏差，需要检查执行条件。"
         evidence = [
             f"未成交标的：{'、'.join(unfilled_symbols) or '无'}",
+            f"部分成交标的：{'、'.join(partial_symbols) or '无'}",
             f"大幅跳空标的：{'、'.join(item['symbol'] for item in large_gaps) or '无'}",
         ]
         next_focus = "检查停牌、涨跌停、开盘跳空和资金约束。"
@@ -813,16 +1179,24 @@ def _build_daily_journal(
             "unfilled_symbols": unfilled_symbols,
             "daily_return": snapshot["daily_return"],
             "drawdown": snapshot["drawdown"],
+            "corporate_actions": list(corporate_actions or []),
+            "execution_reconciliation": reconciliation,
         },
         "analysis": {
             "market_regime": snapshot["market_regime"],
             "breadth": snapshot["breadth"],
+            "candidate_breadth": snapshot.get("candidate_breadth"),
+            "breadth_source": snapshot.get("breadth_source", "candidate_pool"),
             "data_quality": snapshot["data_quality"],
             "top_sectors": analysis["top_sectors"],
             "selected_symbols": analysis["selected_symbols"],
             "position_count": len(positions),
             "equity": snapshot["equity"],
             "cash": snapshot["cash"],
+            "requested_exposure": snapshot.get("requested_exposure"),
+            "allocated_exposure": snapshot.get("allocated_exposure"),
+            "unallocated_exposure": snapshot.get("unallocated_exposure"),
+            "exposure_constraint": snapshot.get("exposure_constraint"),
         },
         "decision": {
             "action_count": len(next_plan),
@@ -847,6 +1221,9 @@ def _process_dates(
     dates: list[pd.Timestamp],
     failed_symbols: int,
     strategy_id: str,
+    corporate_actions_by_date: dict[
+        pd.Timestamp, list[dict[str, Any]]
+    ] | None = None,
 ) -> int:
     positions = {
         item["symbol"]: {
@@ -854,6 +1231,10 @@ def _process_dates(
             "sector": item["sector"],
             "shares": item["shares"],
             "avg_price": item["avg_price"],
+            "cost_basis_total": item.get(
+                "cost_basis_total",
+                float(item["avg_price"]) * int(item["shares"]),
+            ),
             "entry_date": item["entry_date"],
         }
         for item in store.positions(account["account_id"])
@@ -873,7 +1254,14 @@ def _process_dates(
     for trade_date in dates:
         params = VERSION_LIBRARY[account["current_version"]]
         due_plan = list(account.get("pending_plan", []))
-        executions = _execute_pending(
+        applied_actions = _apply_corporate_actions(
+            account,
+            positions,
+            trade_date,
+            (corporate_actions_by_date or {}).get(trade_date.normalize(), []),
+            store,
+        )
+        executions, execution_reconciliation = _execute_pending(
             account,
             positions,
             trade_date,
@@ -892,6 +1280,12 @@ def _process_dates(
         account["peak_equity"] = max(account["peak_equity"], equity)
         drawdown = equity / account["peak_equity"] - 1
         daily_return = equity / previous_equity - 1 if previous_equity > 0 else 0.0
+        stored_research = account.get("market_research") or {}
+        market_context = (
+            stored_research
+            if stored_research.get("trade_date") == trade_date.date().isoformat()
+            else None
+        )
         analysis = _analyze(
             trade_date,
             frames,
@@ -900,6 +1294,7 @@ def _process_dates(
             positions,
             equity,
             strategy_id,
+            market_context,
         )
         plan = [
             {
@@ -917,10 +1312,16 @@ def _process_dates(
             "daily_return": round(daily_return, 8),
             "drawdown": round(drawdown, 8),
             "breadth": round(analysis["breadth"], 6),
+            "candidate_breadth": round(analysis["candidate_breadth"], 6),
+            "breadth_source": analysis["breadth_source"],
             "market_regime": analysis["market_regime"],
             "data_quality": round(analysis["data_quality"], 6),
             "top_sectors": analysis["top_sectors"],
             "selected_symbols": analysis["selected_symbols"],
+            "requested_exposure": round(analysis["requested_exposure"], 6),
+            "allocated_exposure": round(analysis["allocated_exposure"], 6),
+            "unallocated_exposure": round(analysis["unallocated_exposure"], 6),
+            "exposure_constraint": analysis["exposure_constraint"],
             "strategy_version": account["current_version"],
         }
         store.add_snapshot(account["account_id"], snapshot)
@@ -945,6 +1346,8 @@ def _process_dates(
                 plan,
                 positions,
                 failed_symbols + missing_positions,
+                applied_actions,
+                execution_reconciliation,
             ),
         )
 
@@ -964,6 +1367,7 @@ def _evaluate_version(
     dates: list[pd.Timestamp],
     params: dict[str, Any],
     strategy_id: str,
+    market_context_by_date: dict[pd.Timestamp, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     equity = 1.0
     equity_values: list[float] = []
@@ -1011,6 +1415,7 @@ def _evaluate_version(
             shadow_positions,
             equity,
             strategy_id,
+            (market_context_by_date or {}).get(trade_date.normalize()),
         )
         new_weights = analysis["target_weights"]
         turnover = sum(
@@ -1055,6 +1460,18 @@ def _automatic_upgrade(
     if len(dates) < 252:
         return
     evaluation_dates = dates[-min(len(dates), 756) :]
+    market_context_by_date = {
+        pd.Timestamp(trade_date).normalize(): context
+        for trade_date, context in store.market_contexts(
+            account["account_id"]
+        ).items()
+    }
+    current_context = account.get("market_research") or {}
+    current_context_date = current_context.get("trade_date")
+    if current_context_date:
+        market_context_by_date[pd.Timestamp(current_context_date).normalize()] = (
+            current_context
+        )
     metrics_by_version: dict[str, dict[str, Any]] = {}
     for version, params in VERSION_LIBRARY.items():
         metrics = _evaluate_version(
@@ -1063,6 +1480,7 @@ def _automatic_upgrade(
             evaluation_dates,
             params,
             strategy_id,
+            market_context_by_date,
         )
         metrics_by_version[version] = metrics
         store.save_version(
@@ -1194,6 +1612,13 @@ def replay_paper_simulation(
         request.backtest_start_date,
         request.simulation_end_date,
     )
+    corporate_actions, action_errors = _load_corporate_actions(
+        provider,
+        list(frames),
+        request.simulation_start_date,
+        request.simulation_end_date,
+    )
+    errors.extend(action_errors)
     industries = provider.fetch_industries(list(frames))
     configuration = {
         "strategy_id": request.strategy_id,
@@ -1268,6 +1693,7 @@ def replay_paper_simulation(
         simulation_dates,
         len(errors),
         request.strategy_id,
+        corporate_actions,
     )
     dashboard = store.dashboard(request.account_id)
     dashboard["run"] = {
@@ -1321,6 +1747,13 @@ def advance_paper_simulation(
         history_start,
         request.as_of_date,
     )
+    corporate_actions, action_errors = _load_corporate_actions_for_universe(
+        provider,
+        request.symbols,
+        last_date + timedelta(days=1),
+        request.as_of_date,
+    )
+    errors.extend(action_errors)
     industries = provider.fetch_industries(list(frames))
     dates = [
         day
@@ -1335,6 +1768,7 @@ def advance_paper_simulation(
         dates,
         len(errors),
         strategy_id,
+        corporate_actions,
     )
     account = store.account(request.account_id)
     assert account is not None

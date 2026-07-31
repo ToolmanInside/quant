@@ -12,7 +12,7 @@ ACCOUNT_STATE_DIR = (
     Path(__file__).resolve().parent / "data" / "simulation" / "accounts"
 )
 DATABASE_PATH = ACCOUNT_STATE_DIR / "default.txt"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ACCOUNT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 
 
@@ -31,6 +31,7 @@ def _empty_document() -> dict[str, Any]:
         "account": None,
         "positions": [],
         "executions": [],
+        "corporate_actions": [],
         "snapshots": [],
         "reviews": [],
         "daily_journals": [],
@@ -38,6 +39,7 @@ def _empty_document() -> dict[str, Any]:
         "upgrade_events": [],
         "counters": {
             "execution": 0,
+            "corporate_action": 0,
             "review": 0,
             "upgrade_event": 0,
         },
@@ -76,7 +78,22 @@ class PaperStore:
             document = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"模拟账户文本账本无法读取：{self.path}") from exc
-        if document.get("schema_version") != SCHEMA_VERSION:
+        version = document.get("schema_version", 1)
+        if version == 1:
+            document["schema_version"] = SCHEMA_VERSION
+            document.setdefault("corporate_actions", [])
+            document.setdefault("counters", {}).setdefault("corporate_action", 0)
+            for position in document.get("positions", []):
+                position.setdefault(
+                    "cost_basis_total",
+                    float(position.get("avg_price", 0)) * int(position.get("shares", 0)),
+                )
+            if document.get("account") is not None:
+                document["account"]["requires_reinitialize_reason"] = (
+                    "corporate_action_ledger_v2"
+                )
+            self._dirty = True
+        elif version != SCHEMA_VERSION:
             raise ValueError(
                 f"不支持的模拟账户账本版本：{document.get('schema_version')}"
             )
@@ -190,6 +207,12 @@ class PaperStore:
                 "sector": position["sector"],
                 "shares": int(position["shares"]),
                 "avg_price": float(position["avg_price"]),
+                "cost_basis_total": float(
+                    position.get(
+                        "cost_basis_total",
+                        float(position["avg_price"]) * int(position["shares"]),
+                    )
+                ),
                 "entry_date": position["entry_date"],
             }
             for symbol, position in sorted(positions.items())
@@ -203,6 +226,29 @@ class PaperStore:
                 "id": self._next_id("execution"),
                 "account_id": account_id,
                 **deepcopy(execution),
+            }
+        )
+        self._touch()
+
+    def add_corporate_action(
+        self,
+        account_id: str,
+        action: dict[str, Any],
+    ) -> None:
+        self._assert_account(account_id)
+        duplicate = any(
+            item.get("trade_date") == action.get("trade_date")
+            and item.get("symbol") == action.get("symbol")
+            and item.get("end_date") == action.get("end_date")
+            for item in self._document["corporate_actions"]
+        )
+        if duplicate:
+            return
+        self._document["corporate_actions"].append(
+            {
+                "id": self._next_id("corporate_action"),
+                "account_id": account_id,
+                **deepcopy(action),
             }
         )
         self._touch()
@@ -271,6 +317,15 @@ class PaperStore:
                 self._touch()
                 return
 
+    def market_contexts(self, account_id: str) -> dict[str, dict[str, Any]]:
+        """Return only research saved against its original trading date."""
+        self._assert_account(account_id)
+        return {
+            str(journal["trade_date"]): deepcopy(journal["market_research"])
+            for journal in self._document["daily_journals"]
+            if journal.get("trade_date") and journal.get("market_research")
+        }
+
     def save_version(
         self,
         account_id: str,
@@ -326,27 +381,44 @@ class PaperStore:
         trade_date: str,
     ) -> list[dict[str, Any]]:
         self._assert_account(account_id)
-        executions = sorted(
-            (
-                item
-                for item in self._document["executions"]
-                if item["trade_date"] <= trade_date
-            ),
-            key=lambda item: (item["trade_date"], item["id"]),
+        events = [
+            (item["trade_date"], 1, item["id"], "execution", item)
+            for item in self._document["executions"]
+            if item["trade_date"] <= trade_date
+        ]
+        events.extend(
+            (item["trade_date"], 0, item["id"], "corporate_action", item)
+            for item in self._document["corporate_actions"]
+            if item["trade_date"] <= trade_date
         )
+        events.sort(key=lambda item: item[:3])
         positions: dict[str, dict[str, Any]] = {}
-        for execution in executions:
+        for _, _, _, event_type, event in events:
+            if event_type == "corporate_action":
+                current = positions.get(event["symbol"])
+                if current:
+                    current["shares"] += int(event.get("shares_added", 0))
+                    current["cost_basis_total"] = max(
+                        float(current["cost_basis_total"])
+                        - float(event.get("cash_accrued", 0)),
+                        0.0,
+                    )
+                    if current["shares"] > 0:
+                        current["avg_price"] = (
+                            current["cost_basis_total"] / current["shares"]
+                        )
+                continue
+            execution = event
             symbol = execution["symbol"]
             current = positions.get(symbol)
             if execution["action"] == "BUY":
                 quantity = int(execution["quantity"])
+                added_basis = float(execution["price"]) * quantity
                 if current:
                     previous_shares = int(current["shares"])
                     total_shares = previous_shares + quantity
-                    current["avg_price"] = (
-                        current["avg_price"] * previous_shares
-                        + float(execution["price"]) * quantity
-                    ) / total_shares
+                    current["cost_basis_total"] += added_basis
+                    current["avg_price"] = current["cost_basis_total"] / total_shares
                     current["shares"] = total_shares
                 else:
                     positions[symbol] = {
@@ -355,13 +427,23 @@ class PaperStore:
                         "sector": execution["sector"],
                         "shares": quantity,
                         "avg_price": float(execution["price"]),
+                        "cost_basis_total": added_basis,
                         "entry_date": execution["trade_date"],
                     }
                 continue
             if current:
-                current["shares"] -= int(execution["quantity"])
+                previous_shares = int(current["shares"])
+                sold = min(int(execution["quantity"]), previous_shares)
+                current["cost_basis_total"] *= (
+                    (previous_shares - sold) / previous_shares
+                )
+                current["shares"] -= sold
                 if current["shares"] <= 0:
                     positions.pop(symbol, None)
+                else:
+                    current["avg_price"] = (
+                        current["cost_basis_total"] / current["shares"]
+                    )
         return sorted(positions.values(), key=lambda item: item["symbol"])
 
     def dashboard(self, account_id: str) -> dict[str, Any]:
@@ -376,6 +458,11 @@ class PaperStore:
         latest = snapshots[-1] if snapshots else None
         executions = sorted(
             deepcopy(self._document["executions"]),
+            key=lambda item: (item["trade_date"], item["id"]),
+            reverse=True,
+        )[:30]
+        corporate_actions = sorted(
+            deepcopy(self._document["corporate_actions"]),
             key=lambda item: (item["trade_date"], item["id"]),
             reverse=True,
         )[:30]
@@ -444,6 +531,7 @@ class PaperStore:
             "latest": latest,
             "positions": self.positions(account_id),
             "executions": executions,
+            "corporate_actions": corporate_actions,
             "reviews": reviews,
             "daily_journals": all_journals[:30],
             "journal_count": len(all_journals),
