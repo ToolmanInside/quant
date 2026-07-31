@@ -77,7 +77,6 @@
     "title": "Quant Lab 模拟盘日终报告",
     "midday_title": "Quant Lab 午间盘位报告",
     "max_holdings": 5,
-    "max_plans": 5,
     "include_reflection": true
   }
 }

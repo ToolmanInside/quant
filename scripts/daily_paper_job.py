@@ -72,7 +72,6 @@ class UnifiedConfig:
     report_title: str
     midday_report_title: str
     max_holdings: int
-    max_plans: int
     include_reflection: bool
     reinitialize_on_config_change: bool
 
@@ -256,7 +255,6 @@ def load_unified_config(path: Path) -> UnifiedConfig:
             report.get("midday_title", "Quant Lab 午间盘位报告")
         ),
         max_holdings=max(1, int(report.get("max_holdings", 5))),
-        max_plans=max(1, int(report.get("max_plans", 5))),
         include_reflection=bool(report.get("include_reflection", True)),
         reinitialize_on_config_change=bool(
             account_payload.get("reinitialize_on_config_change", True)
@@ -302,13 +300,13 @@ def _holding_lines(
 
 def _plan_lines(
     dashboard: dict[str, Any],
-    maximum: int,
 ) -> list[str]:
     plan = dashboard["account"].get("pending_plan") or []
     if not plan:
         return ["- **无新增交易指令**：下一交易日维持当前持仓/空仓，等待新信号。"]
     lines = []
-    for item in plan[:maximum]:
+    # 交易计划属于必须完整披露的信息。企业微信超长内容由发送层分段处理。
+    for item in plan:
         action = ACTION_NAMES.get(item["action"], item["action"])
         lines.append(
             (
@@ -316,10 +314,6 @@ def _plan_lines(
                 f"目标仓位 {float(item['target_weight']):.1%}；"
                 f"{_trim(item['reason'])}"
             )
-        )
-    if len(plan) > maximum:
-        lines.append(
-            f"- 另有 {len(plan) - maximum} 条计划，请在模拟盘页面查看"
         )
     return lines
 
@@ -461,7 +455,6 @@ def build_markdown_report(
     generated_at: datetime,
     title: str = "Quant Lab 模拟盘日终报告",
     max_holdings: int = 5,
-    max_plans: int = 5,
     include_reflection: bool = True,
 ) -> str:
     account = dashboard["account"]
@@ -550,7 +543,7 @@ def build_markdown_report(
         *_news_research_lines(dashboard),
         "",
         "#### 下一交易日计划",
-        *_plan_lines(dashboard, max_plans),
+        *_plan_lines(dashboard),
         "",
         "> 本报告来自模拟账户，不连接券商，不构成投资建议。",
     ]
@@ -563,7 +556,6 @@ def build_position_report(
     generated_at: datetime,
     title: str = "Quant Lab 午间盘位报告",
     max_holdings: int = 20,
-    max_plans: int = 20,
 ) -> str:
     account = dashboard["account"]
     latest = dashboard.get("latest")
@@ -606,7 +598,7 @@ def build_position_report(
             *_holding_lines(dashboard, max_holdings),
             "",
             "#### 已生成的下一步计划",
-            *_plan_lines(dashboard, max_plans),
+            *_plan_lines(dashboard),
             "",
             "> 午间任务只读账户文本，不推进策略、不产生模拟成交。",
         ]
@@ -629,6 +621,42 @@ def load_account_dashboard(
         store.close()
 
 
+def _split_markdown_messages(
+    content: str,
+    maximum_bytes: int = 3500,
+) -> list[str]:
+    """Split a report without dropping lines or breaking UTF-8 characters."""
+    if len(content.encode("utf-8")) <= maximum_bytes:
+        return [content]
+
+    chunks: list[str] = []
+    current = ""
+    for line in content.splitlines(keepends=True):
+        if len((current + line).encode("utf-8")) <= maximum_bytes:
+            current += line
+            continue
+        if current:
+            chunks.append(current.rstrip("\n"))
+            current = ""
+        while len(line.encode("utf-8")) > maximum_bytes:
+            piece = ""
+            for character in line:
+                if len((piece + character).encode("utf-8")) > maximum_bytes:
+                    break
+                piece += character
+            chunks.append(piece.rstrip("\n"))
+            line = line[len(piece) :]
+        current = line
+    if current:
+        chunks.append(current.rstrip("\n"))
+
+    total = len(chunks)
+    return [
+        f"### 日报分段 {index}/{total}\n{chunk}"
+        for index, chunk in enumerate(chunks, start=1)
+    ]
+
+
 def send_wechat_markdown(
     webhook_url: str,
     content: str,
@@ -639,49 +667,44 @@ def send_wechat_markdown(
 ) -> None:
     if not webhook_url.startswith("https://qyapi.weixin.qq.com/cgi-bin/webhook/send"):
         raise ValueError("WECHAT_WEBHOOK_URL 不是有效的企业微信机器人 Webhook")
-    suffix = "\n\n> 消息过长，完整内容请查看 GitHub Actions 日报。"
-    encoded = content.encode("utf-8")
-    if len(encoded) > 3900:
-        budget = 3900 - len(suffix.encode("utf-8"))
-        truncated = encoded[:budget]
-        while True:
-            try:
-                content = truncated.decode("utf-8") + suffix
-                break
-            except UnicodeDecodeError:
-                truncated = truncated[:-1]
-    payload = {"msgtype": "markdown", "markdown": {"content": content}}
+    messages = _split_markdown_messages(content)
     owns_client = client is None
     active_client = client or httpx.Client(timeout=timeout_seconds)
     try:
-        last_error_message = ""
-        for attempt in range(retry_count + 1):
-            try:
-                response = active_client.post(webhook_url, json=payload)
-                response.raise_for_status()
-                result = response.json()
-                if result.get("errcode") != 0:
-                    raise RuntimeError(
-                        "企业微信机器人拒绝消息："
-                        f"{result.get('errmsg', '未知错误')}"
-                    )
-                return
-            except httpx.HTTPStatusError as exc:
-                last_error_message = f"HTTP {exc.response.status_code}"
-            except httpx.HTTPError as exc:
-                last_error_message = type(exc).__name__
-            except (RuntimeError, ValueError) as exc:
-                last_error_message = str(exc)
-            if last_error_message:
+        for message_index, message in enumerate(messages, start=1):
+            payload = {"msgtype": "markdown", "markdown": {"content": message}}
+            last_error_message = ""
+            for attempt in range(retry_count + 1):
+                try:
+                    response = active_client.post(webhook_url, json=payload)
+                    response.raise_for_status()
+                    result = response.json()
+                    if result.get("errcode") != 0:
+                        raise RuntimeError(
+                            "企业微信机器人拒绝消息："
+                            f"{result.get('errmsg', '未知错误')}"
+                        )
+                    last_error_message = ""
+                    break
+                except httpx.HTTPStatusError as exc:
+                    last_error_message = f"HTTP {exc.response.status_code}"
+                except httpx.HTTPError as exc:
+                    last_error_message = type(exc).__name__
+                except (RuntimeError, ValueError) as exc:
+                    last_error_message = str(exc)
                 LOGGER.warning(
-                    "企业微信推送第 %s/%s 次失败：%s",
+                    "企业微信第 %s/%s 段推送第 %s/%s 次失败：%s",
+                    message_index,
+                    len(messages),
                     attempt + 1,
                     retry_count + 1,
                     last_error_message,
                 )
-        raise RuntimeError(
-            f"企业微信推送失败，已重试 {retry_count} 次：{last_error_message}"
-        )
+            if last_error_message:
+                raise RuntimeError(
+                    f"企业微信第 {message_index}/{len(messages)} 段推送失败，"
+                    f"已重试 {retry_count} 次：{last_error_message}"
+                )
     finally:
         if owns_client:
             active_client.close()
@@ -1094,7 +1117,6 @@ def main() -> int:
                 generated_at=generated_at,
                 title=unified.midday_report_title,
                 max_holdings=unified.max_holdings,
-                max_plans=unified.max_plans,
             )
             report_path = args.report or unified.midday_report_path
         else:
@@ -1116,7 +1138,6 @@ def main() -> int:
                 generated_at=generated_at,
                 title=unified.report_title,
                 max_holdings=unified.max_holdings,
-                max_plans=unified.max_plans,
                 include_reflection=unified.include_reflection,
             )
             report_path = args.report or unified.report_path

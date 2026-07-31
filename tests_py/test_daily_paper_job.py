@@ -119,6 +119,49 @@ def test_wechat_payload_uses_markdown_and_checks_success() -> None:
     }
 
 
+def test_report_never_omits_trading_plans() -> None:
+    dashboard = dashboard_fixture()
+    dashboard["account"]["pending_plan"] = [
+        {
+            "symbol": f"00000{index}.SZ",
+            "name": f"计划{index}",
+            "action": "BUY",
+            "target_weight": 0.1,
+            "reason": f"完整原因{index}",
+        }
+        for index in range(1, 8)
+    ]
+
+    report = build_markdown_report(
+        dashboard,
+        generated_at=datetime(2026, 7, 31, 18, 0),
+    )
+
+    assert "计划1" in report
+    assert "计划7" in report
+    assert "另有" not in report
+
+
+def test_wechat_long_report_is_split_without_omitting_tail() -> None:
+    captured: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content)["markdown"]["content"])
+        return httpx.Response(200, json={"errcode": 0, "errmsg": "ok"})
+
+    content = "\n".join(f"- 完整交易计划 {index}：" + "理由" * 80 for index in range(30))
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        send_wechat_markdown(
+            "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
+            content,
+            client=client,
+        )
+
+    assert len(captured) > 1
+    assert any("完整交易计划 29" in message for message in captured)
+    assert all(len(message.encode("utf-8")) < 3900 for message in captured)
+
+
 def test_unified_config_resolves_secrets_and_all_runtime_settings(
     monkeypatch,
 ) -> None:
