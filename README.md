@@ -37,15 +37,9 @@ GitHub Actions 日终模拟与企业微信推送配置见
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
-如需使用 Tushare，推荐将统一配置模板复制为本地配置：
-
-```powershell
-Copy-Item config\quant-config.example.json config\quant-config.json
-```
-
-然后在 `config/quant-config.json` 中填写 Tushare Token、企业微信 Webhook、策略、
-股票池、日期和其他运行参数。该文件已被 Git 忽略。为了兼容旧配置，后端仍可从
-`.env` 的 `TUSHARE_TOKEN` 读取 Token。Token 只由 Python 服务读取，不会返回给浏览器。
+所有设置只读取 `config/quant-config.json`。在这里调整策略、股票池、资金、日期和
+其他运行参数；Tushare Token 与企业微信 Webhook 保留环境变量占位符，由本地 `.env`
+或 GitHub Secrets 注入。Token 只由 Python 服务读取，不会返回给浏览器。
 
 ## 启动
 

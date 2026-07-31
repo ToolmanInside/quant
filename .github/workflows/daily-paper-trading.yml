@@ -78,7 +78,7 @@ jobs:
       - name: Update data, analyze and push tomorrow's plan
         run: >-
           python scripts/daily_paper_job.py
-          --config config/quant-config.example.json
+          --config config/quant-config.json
 
       - name: Save paper account and market-data cache
         if: ${{ env.PAPER_JOB_MODE == 'daily-close' }}

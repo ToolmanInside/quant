@@ -64,6 +64,7 @@ class UnifiedConfig:
     max_holdings: int
     max_plans: int
     include_reflection: bool
+    reinitialize_on_config_change: bool
 
 
 def _resolve_environment_placeholder(
@@ -178,6 +179,9 @@ def load_unified_config(path: Path) -> UnifiedConfig:
         max_holdings=max(1, int(report.get("max_holdings", 5))),
         max_plans=max(1, int(report.get("max_plans", 5))),
         include_reflection=bool(report.get("include_reflection", True)),
+        reinitialize_on_config_change=bool(
+            account_payload.get("reinitialize_on_config_change", True)
+        ),
     )
 
 
@@ -259,6 +263,7 @@ def build_markdown_report(
     current_equity = float(latest["equity"])
     current_return = current_equity / initial_cash - 1
     peak_return = float(account["peak_equity"]) / initial_cash - 1
+    configuration = account.get("configuration") or {}
     run = dashboard.get("run") or {}
     processed_days = int(run.get("processed_days", 0))
     run_status = (
@@ -293,6 +298,23 @@ def build_markdown_report(
         (
             f"- 可用现金：{_money(float(account['cash']))}；"
             f"持仓市值：{_money(float(latest['market_value']))}"
+        ),
+        "",
+        "#### 本次生效配置",
+        f"- 配置初始资金：**{_money(initial_cash)}**",
+        (
+            "- 回测区间："
+            f"**{configuration.get('backtest_start_date', '—')}** 至 "
+            f"**{configuration.get('backtest_end_date', '—')}**"
+        ),
+        (
+            "- 模拟盘起点："
+            f"**{configuration.get('simulation_start_date', '—')}**"
+        ),
+        (
+            "- 策略："
+            f"**{configuration.get('strategy_name', configuration.get('strategy_id', '—'))}**；"
+            f"频率 **{configuration.get('frequency', '1d')}**"
         ),
         "",
         f"#### 当前持仓（{len(dashboard.get('positions') or [])} 个）",
@@ -338,6 +360,7 @@ def build_position_report(
     position_ratio = market_value / equity if equity > 0 else 0.0
     current_return = equity / initial_cash - 1
     peak_return = float(account["peak_equity"]) / initial_cash - 1
+    configuration = account.get("configuration") or {}
     return "\n".join(
         [
             f"### {title}",
@@ -356,6 +379,11 @@ def build_position_report(
             (
                 f"- 可用现金：{_money(float(account['cash']))}；"
                 f"持仓市值：{_money(market_value)}"
+            ),
+            (
+                "- 账户配置：初始资金 "
+                f"**{_money(initial_cash)}**；模拟起点 "
+                f"**{configuration.get('simulation_start_date', '—')}**"
             ),
             "",
             f"#### 持仓明细（{len(dashboard.get('positions') or [])} 个）",
@@ -465,6 +493,7 @@ def run_daily_job(
     as_of_date: date,
     tushare_token: str,
     force_reinitialize: bool = False,
+    reinitialize_on_config_change: bool = True,
 ) -> dict[str, Any]:
     if as_of_date < config.simulation_start_date:
         raise ValueError(
@@ -475,7 +504,19 @@ def run_daily_job(
     store = PaperStore(state_path)
     try:
         account = store.account(config.account_id)
-        if account is None or force_reinitialize:
+        configuration_changed = (
+            account is not None and _configuration_changed(account, config)
+        )
+        if (
+            account is None
+            or force_reinitialize
+            or (configuration_changed and reinitialize_on_config_change)
+        ):
+            if configuration_changed and not force_reinitialize:
+                LOGGER.warning(
+                    "检测到账户关键配置变化，自动重建账户 %s",
+                    config.account_id,
+                )
             LOGGER.info(
                 "初始化模拟账户 %s，并历史回放到 %s",
                 config.account_id,
@@ -496,7 +537,7 @@ def run_daily_job(
                 store,
             )
 
-        if _configuration_changed(account, config):
+        if configuration_changed:
             raise ValueError(
                 "仓库配置与持久化模拟账户不一致。"
                 "请手动运行工作流并启用 force_reinitialize 以重建账户。"
@@ -536,11 +577,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=(
-            Path("config/quant-config.json")
-            if Path("config/quant-config.json").exists()
-            else Path("config/quant-config.example.json")
-        ),
+        default=Path("config/quant-config.json"),
     )
     parser.add_argument(
         "--state-directory",
@@ -608,6 +645,9 @@ def main() -> int:
                 as_of_date=as_of_date,
                 tushare_token=unified.tushare_token,
                 force_reinitialize=args.force_reinitialize,
+                reinitialize_on_config_change=(
+                    unified.reinitialize_on_config_change
+                ),
             )
             report = build_markdown_report(
                 dashboard,
@@ -636,7 +676,14 @@ def main() -> int:
                 timeout_seconds=unified.notification_timeout,
                 retry_count=unified.notification_retries,
             )
-            LOGGER.info("企业微信%s推送成功", unified.midday_report_title if args.mode == "noon-position" else unified.report_title)
+            LOGGER.info(
+                "企业微信%s推送成功",
+                (
+                    unified.midday_report_title
+                    if args.mode == "noon-position"
+                    else unified.report_title
+                ),
+            )
         return 0
     except Exception:
         LOGGER.exception("模拟盘定时任务失败")

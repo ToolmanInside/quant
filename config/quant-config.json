@@ -31,7 +31,8 @@
     "backtest_start_date": "2024-01-01",
     "backtest_end_date": "2025-12-31",
     "simulation_start_date": "2026-01-01",
-    "initial_cash": 500000
+    "initial_cash": 500000,
+    "reinitialize_on_config_change": true
   },
   "storage": {
     "state_directory": ".quant-state/accounts",

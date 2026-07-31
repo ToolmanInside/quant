@@ -20,14 +20,7 @@
 
 ## 一、统一配置文件
 
-所有运行配置集中在 `config/quant-config.json`。这个文件可能包含真实 Token 和
-Webhook，已加入 `.gitignore`，不会提交到 GitHub。
-
-首次本地使用：
-
-```powershell
-Copy-Item config\quant-config.example.json config\quant-config.json
-```
+所有运行配置只读取 `config/quant-config.json`，不存在示例文件回退逻辑。
 
 统一配置包括：
 
@@ -39,11 +32,9 @@ Copy-Item config\quant-config.example.json config\quant-config.json
 - 每账户文本账本目录、日报输出路径。
 - 推送标题、最大持仓/计划展示数量和是否包含反思。
 
-真实值可以直接写入本地的 `quant-config.json`，也可以保留
-`${TUSHARE_TOKEN}`、`${WECHAT_WEBHOOK_URL}` 占位符，让程序从环境变量读取。
-
-GitHub Actions 使用同结构的 `quant-config.example.json`，并用 Repository Secrets
-替换两个占位符，所以仓库中仍然只有一套配置结构。
+为了避免泄露密钥，已提交的配置保留 `${TUSHARE_TOKEN}`、
+`${WECHAT_WEBHOOK_URL}` 占位符，程序从本地环境变量或 GitHub Repository Secrets
+读取真实值。GitHub Actions 与本地任务读取的是同一个配置文件。
 
 > GitHub 的 `schedule` 在检出仓库之前触发，不能动态读取 JSON。因此统一配置中的
 > `schedule.position_report_at`、`schedule.daily_close_at` 是记录值，工作流中的
@@ -86,9 +77,13 @@ GitHub Actions 使用同结构的 `quant-config.example.json`，并用 Repositor
 
 ## 四、修改策略或账户配置
 
-模拟账户已经产生记录后，如果修改策略、股票池、资金或日期，任务会停止并提示配置
-不一致，避免静默重置账本。此时在 Actions 页面手动运行 `Daily paper trading`，
-勾选 `force_reinitialize`，即可按新配置重建该账户的文本文件。
+`paper_account.reinitialize_on_config_change` 默认为 `true`。修改策略、股票池、
+初始资金或回测/模拟日期并提交到默认分支后，下一次日终任务会识别配置变化，自动
+重建账户 TXT 并按新配置完成历史推演。日报会显示本次实际生效的初始资金、回测区间
+和模拟盘起点。
+
+如将该开关设为 `false`，配置不一致时任务会失败而不重置。此时可在 Actions 页面
+手动运行 `Daily paper trading` 并勾选 `force_reinitialize`。
 
 ## 五、首次运行
 
