@@ -58,7 +58,7 @@
     ],
     "backtest_start_date": "2024-01-01",
     "backtest_end_date": "2025-12-31",
-    "simulation_start_date": "2026-01-01",
+    "simulation_start_date": "2026-07-30",
     "initial_cash": 100000,
     "reinitialize_on_config_change": true
   },
@@ -76,7 +76,7 @@
   "report": {
     "title": "Quant Lab 模拟盘日终报告",
     "midday_title": "Quant Lab 午间盘位报告",
-    "max_holdings": 5,
+    "max_holdings": 20,
     "include_reflection": true
   }
 }
