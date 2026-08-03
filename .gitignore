@@ -11,6 +11,13 @@
 !.yarn/versions
 /.pnpm-store
 /.pytest_cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+backend/__pycache__
+backend/*/__pycache__
+scripts/__pycache__
+tests_py/__pycache__
 
 # testing
 /coverage

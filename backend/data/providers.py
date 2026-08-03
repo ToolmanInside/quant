@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import json
 
@@ -12,6 +12,7 @@ from backend.models import is_etf
 
 
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
+QUALITY_CACHE_MAX_AGE = timedelta(hours=20)
 
 @dataclass(frozen=True)
 class MarketData:
@@ -166,6 +167,7 @@ class TushareDataProvider:
         return sorted(
             pd.to_datetime(frame["cal_date"], format="%Y%m%d").dt.date.tolist()
         )
+
 
     def fetch_corporate_actions(
         self,
@@ -517,39 +519,63 @@ class TushareDataProvider:
         errors: list[str],
     ) -> pd.DataFrame:
         period = self._latest_fully_reported_period(trade_date)
-        cache_path = CACHE_DIR / f"market_quality_{period}.csv"
-        if cache_path.exists():
-            return pd.read_csv(cache_path)
+        # Cache the unfiltered vendor snapshot.  Point-in-time filtering must be
+        # applied on every read; otherwise a cache created on an early date can
+        # permanently hide later announcements, while a cache created later can
+        # leak those announcements into a historical replay.
+        cache_path = CACHE_DIR / f"market_quality_raw_{period}.csv"
+        cached = pd.read_csv(cache_path) if cache_path.exists() else None
+        cache_fresh = cached is not None and self._cache_is_fresh(
+            cache_path,
+            QUALITY_CACHE_MAX_AGE,
+        )
+        frame = cached
         try:
-            frame = self._pro.fina_indicator_vip(
-                period=period,
-                fields=(
-                    "ts_code,ann_date,end_date,roe,grossprofit_margin,"
-                    "q_netprofit_margin,debt_to_assets,q_salescash_to_or"
-                ),
-            )
+            if not cache_fresh:
+                frame = self._pro.fina_indicator_vip(
+                    period=period,
+                    fields=(
+                        "ts_code,ann_date,end_date,roe,grossprofit_margin,"
+                        "q_netprofit_margin,debt_to_assets,q_salescash_to_or"
+                    ),
+                )
+                if frame is not None and not frame.empty:
+                    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    frame.to_csv(cache_path, index=False, encoding="utf-8")
             if frame is None or frame.empty:
                 errors.append(f"fina_indicator_vip 报告期 {period} 没有数据")
                 return pd.DataFrame()
-            if "ann_date" in frame.columns:
-                frame = frame[
-                    frame["ann_date"].astype(str)
-                    <= trade_date.strftime("%Y%m%d")
-                ]
-            frame = (
-                frame.sort_values(["ts_code", "ann_date"])
-                .drop_duplicates("ts_code", keep="last")
-                .reset_index(drop=True)
-            )
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            frame.to_csv(cache_path, index=False, encoding="utf-8")
-            return frame
         except Exception as exc:
+            if cached is None or cached.empty:
+                errors.append(
+                    "盈利质量因子获取失败，将按中性分处理："
+                    f"{type(exc).__name__}: {exc}"
+                )
+                return pd.DataFrame()
+            frame = cached
             errors.append(
-                "盈利质量因子获取失败，将按中性分处理："
+                "盈利质量因子刷新失败，暂时使用旧的原始缓存并继续按公告日过滤："
                 f"{type(exc).__name__}: {exc}"
             )
-            return pd.DataFrame()
+
+        frame = frame.copy()
+        if "ann_date" in frame.columns:
+            announcement_dates = pd.to_datetime(
+                frame["ann_date"].astype(str),
+                format="%Y%m%d",
+                errors="coerce",
+            )
+            frame = frame[announcement_dates.dt.date <= trade_date]
+        if frame.empty:
+            return frame.reset_index(drop=True)
+        sort_columns = [
+            column for column in ("ts_code", "ann_date") if column in frame.columns
+        ]
+        if sort_columns:
+            frame = frame.sort_values(sort_columns)
+        if "ts_code" in frame.columns:
+            frame = frame.drop_duplicates("ts_code", keep="last")
+        return frame.reset_index(drop=True)
 
     @staticmethod
     def _latest_fully_reported_period(value: date) -> str:
@@ -581,6 +607,14 @@ class TushareDataProvider:
         frame = pd.read_csv(path)
         frame[time_column] = pd.to_datetime(frame[time_column])
         return frame
+
+    @staticmethod
+    def _cache_is_fresh(path: Path, max_age: timedelta) -> bool:
+        age = datetime.now(timezone.utc) - datetime.fromtimestamp(
+            path.stat().st_mtime,
+            tz=timezone.utc,
+        )
+        return age <= max_age
 
     @staticmethod
     def _write_cache(path: Path, frame: pd.DataFrame) -> None:

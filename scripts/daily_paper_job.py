@@ -24,7 +24,11 @@ from backend.market_research import (
     MarketUniverseConfig,
     research_full_market,
 )
-from backend.models import PaperAdvanceRequest, PaperSimulationRequest
+from backend.models import (
+    PaperAdvanceRequest,
+    PaperSimulationRequest,
+    normalize_ts_code,
+)
 from backend.news_research import NewsResearchConfig, enrich_with_bocha_news
 from backend.paper_store import PaperStore
 from backend.paper_trading import advance_paper_simulation, replay_paper_simulation
@@ -105,6 +109,26 @@ def _resolve_environment_placeholder(
     return text
 
 
+def _strict_bool(value: object, field_name: str, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    raise ValueError(
+        f"配置项 {field_name} 必须使用 JSON 布尔值 true 或 false，"
+        "不能使用字符串"
+    )
+
+
+def _normalized_symbol_list(value: object, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"配置项 {field_name} 必须是证券代码数组")
+    try:
+        return list(dict.fromkeys(normalize_ts_code(symbol) for symbol in value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"配置项 {field_name} 包含无效证券代码：{exc}") from exc
+
+
 def load_unified_config(path: Path) -> UnifiedConfig:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -163,16 +187,20 @@ def load_unified_config(path: Path) -> UnifiedConfig:
             1,
             min(int(universe_payload.get("max_candidates_per_sector", 6)), 20),
         ),
-        always_include_symbols=[
-            str(symbol)
-            for symbol in universe_payload.get("always_include_symbols", [])
-        ],
+        always_include_symbols=_normalized_symbol_list(
+            universe_payload.get("always_include_symbols", []),
+            "market_universe.always_include_symbols",
+        ),
         factor_weights={
             str(name): float(value) for name, value in factor_weights.items()
         },
     )
     news_payload = payload.get("news_research") or {}
-    news_enabled = bool(news_payload.get("enabled", False))
+    news_enabled = _strict_bool(
+        news_payload.get("enabled"),
+        "news_research.enabled",
+        False,
+    )
     news_research = NewsResearchConfig(
         enabled=news_enabled,
         freshness=str(news_payload.get("freshness", "oneWeek")),
@@ -203,7 +231,11 @@ def load_unified_config(path: Path) -> UnifiedConfig:
         if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", field_value):
             raise ValueError(f"{field_name} 必须使用 HH:MM 24 小时格式")
 
-    wechat_enabled = bool(notification.get("wechat_enabled", True))
+    wechat_enabled = _strict_bool(
+        notification.get("wechat_enabled"),
+        "notification.wechat_enabled",
+        True,
+    )
     raw_webhook = notification.get("wechat_webhook_url", "")
     webhook = (
         _resolve_environment_placeholder(
@@ -219,7 +251,10 @@ def load_unified_config(path: Path) -> UnifiedConfig:
             account_id=str(account_payload["account_id"]),
             strategy_id=str(account_payload["strategy_id"]),
             frequency=frequency,
-            symbols=[str(symbol) for symbol in account_payload["symbols"]],
+            symbols=_normalized_symbol_list(
+                account_payload["symbols"],
+                "paper_account.symbols",
+            ),
             backtest_start_date=date.fromisoformat(
                 account_payload["backtest_start_date"]
             ),
@@ -244,7 +279,11 @@ def load_unified_config(path: Path) -> UnifiedConfig:
         timezone=timezone,
         position_report_at=position_report_at,
         daily_close_at=daily_close_at,
-        run_every_day=bool(schedule.get("run_every_day", True)),
+        run_every_day=_strict_bool(
+            schedule.get("run_every_day"),
+            "schedule.run_every_day",
+            True,
+        ),
         state_directory=Path(
             storage.get("state_directory", ".quant-state/accounts")
         ),
@@ -269,9 +308,15 @@ def load_unified_config(path: Path) -> UnifiedConfig:
             report.get("midday_title", "Quant Lab 午间盘位报告")
         ),
         max_holdings=max(1, int(report.get("max_holdings", 5))),
-        include_reflection=bool(report.get("include_reflection", True)),
-        reinitialize_on_config_change=bool(
-            account_payload.get("reinitialize_on_config_change", True)
+        include_reflection=_strict_bool(
+            report.get("include_reflection"),
+            "report.include_reflection",
+            True,
+        ),
+        reinitialize_on_config_change=_strict_bool(
+            account_payload.get("reinitialize_on_config_change"),
+            "paper_account.reinitialize_on_config_change",
+            True,
         ),
     )
 

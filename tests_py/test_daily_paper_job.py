@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -185,6 +186,51 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.daily_close_at == "18:00"
     assert config.state_directory.as_posix() == ".quant-state/accounts"
     assert config.reinitialize_on_config_change
+
+
+def test_unified_config_rejects_string_boolean(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
+    payload = json.loads(Path("config/quant-config.json").read_text(encoding="utf-8"))
+    payload["notification"]["wechat_enabled"] = "false"
+    path = tmp_path / "quant-config.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    try:
+        load_unified_config(path)
+    except ValueError as exc:
+        assert "JSON 布尔值" in str(exc)
+    else:
+        raise AssertionError("string boolean must be rejected")
+
+
+def test_unified_config_normalizes_symbols(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
+    monkeypatch.setenv("BOCHA_API_KEY", "test-bocha-token")
+    monkeypatch.setenv(
+        "WECHAT_WEBHOOK_URL",
+        "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
+    )
+    payload = json.loads(Path("config/quant-config.json").read_text(encoding="utf-8"))
+    payload = deepcopy(payload)
+    payload["paper_account"]["symbols"] = [
+        "159611",
+        "002317.sz",
+        "600183",
+        "603738",
+        "600367",
+    ]
+    path = tmp_path / "quant-config.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    config = load_unified_config(path)
+
+    assert config.paper_account.symbols == [
+        "159611.SZ",
+        "002317.SZ",
+        "600183.SH",
+        "603738.SH",
+        "600367.SH",
+    ]
 
 
 def test_changed_account_config_is_reinitialized_automatically(

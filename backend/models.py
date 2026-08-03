@@ -107,7 +107,6 @@ class StrategyMatrixRequest(BaseModel):
         if len(normalized) > 50:
             raise ValueError("单次最多评测 50 个标的")
         return normalized
-
     @model_validator(mode="after")
     def validate_range(self) -> "StrategyMatrixRequest":
         if self.start_date >= self.end_date:

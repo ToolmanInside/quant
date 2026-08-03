@@ -7,8 +7,9 @@ import time
 import traceback
 import urllib.request
 import webbrowser
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,8 @@ HEALTH_URL = "http://127.0.0.1:8000/api/health"
 PAPER_DASHBOARD_URL = "http://127.0.0.1:8000/api/paper/dashboard"
 PAPER_ADVANCE_URL = "http://127.0.0.1:8000/api/paper/advance"
 DAILY_SIMULATION_HOUR = 18
+DAILY_RETRY_DELAY = timedelta(minutes=15)
+LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def is_ready(url: str) -> bool:
@@ -39,11 +42,16 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
         process.kill()
 
 
-def run_daily_paper_if_due(last_attempt: date | None) -> date | None:
-    now = datetime.now()
+def run_daily_paper_if_due(
+    last_success: date | None,
+    retry_after: datetime | None,
+) -> tuple[date | None, datetime | None]:
+    now = datetime.now(LOCAL_TIMEZONE)
     today = now.date()
-    if last_attempt == today or now.hour < DAILY_SIMULATION_HOUR:
-        return last_attempt
+    if last_success == today or now.hour < DAILY_SIMULATION_HOUR:
+        return last_success, retry_after
+    if retry_after is not None and now < retry_after:
+        return last_success, retry_after
 
     print(f"[paper] {now:%Y-%m-%d %H:%M:%S} running the daily simulation.")
     try:
@@ -65,13 +73,20 @@ def run_daily_paper_if_due(last_attempt: date | None) -> date | None:
         with urllib.request.urlopen(request, timeout=600) as response:
             result = json.loads(response.read().decode("utf-8"))
         print(f"[paper] {result['run']['message']}")
+        return today, None
     except Exception:
         print(
             "[paper] Daily simulation failed. Full error follows:",
             file=sys.stderr,
         )
         traceback.print_exc()
-    return today
+        retry_at = now + DAILY_RETRY_DELAY
+        print(
+            f"[paper] Will retry after {retry_at:%Y-%m-%d %H:%M:%S} "
+            "Asia/Shanghai.",
+            file=sys.stderr,
+        )
+        return last_success, retry_at
 
 
 def main() -> int:
@@ -128,14 +143,18 @@ def main() -> int:
             print("Startup timed out. Review the visible logs above.", file=sys.stderr)
             return 1
 
-        last_daily_attempt: date | None = None
+        last_daily_success: date | None = None
+        daily_retry_after: datetime | None = None
         while True:
             for process in processes:
                 exit_code = process.poll()
                 if exit_code is not None:
                     print(f"A local service exited with code {exit_code}.", file=sys.stderr)
                     return exit_code or 1
-            last_daily_attempt = run_daily_paper_if_due(last_daily_attempt)
+            last_daily_success, daily_retry_after = run_daily_paper_if_due(
+                last_daily_success,
+                daily_retry_after,
+            )
             time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nStopping Quant Lab...")

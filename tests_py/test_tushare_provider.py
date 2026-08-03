@@ -50,6 +50,24 @@ class FakePro:
             ]
         )
 
+    def fina_indicator_vip(self, **kwargs):
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "ann_date": "20260410",
+                    "end_date": kwargs["period"],
+                    "roe": 10.0,
+                },
+                {
+                    "ts_code": "000001.SZ",
+                    "ann_date": "20260425",
+                    "end_date": kwargs["period"],
+                    "roe": 20.0,
+                },
+            ]
+        )
+
 
 def _provider() -> TushareDataProvider:
     provider = object.__new__(TushareDataProvider)
@@ -89,3 +107,20 @@ def test_corporate_actions_are_queried_by_ex_date_for_whole_universe(
     assert list(result["ts_code"]) == ["000001.SZ"]
     assert result.loc[0, "ex_date"] == pd.Timestamp("2025-01-03")
     assert result.loc[0, "stk_div"] == 0.1
+
+
+def test_quality_cache_keeps_raw_rows_and_filters_each_as_of_date(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(providers, "CACHE_DIR", tmp_path)
+    provider = _provider()
+
+    early = provider._fetch_quality_snapshot(date(2026, 4, 20), [])
+    later = provider._fetch_quality_snapshot(date(2026, 4, 26), [])
+    historical = provider._fetch_quality_snapshot(date(2026, 4, 15), [])
+
+    assert early.loc[0, "roe"] == 10.0
+    assert later.loc[0, "roe"] == 20.0
+    assert historical.loc[0, "roe"] == 10.0
+    assert (tmp_path / "market_quality_raw_20251231.csv").exists()

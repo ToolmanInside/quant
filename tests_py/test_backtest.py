@@ -76,3 +76,12 @@ def test_symbol_is_normalized(
 def test_wrong_exchange_is_rejected() -> None:
     with pytest.raises(ValidationError, match="应使用后缀 .SZ"):
         BacktestRequest(symbol="002317.SH")
+
+
+@pytest.mark.parametrize(("column", "value"), [("open", float("nan")), ("close", 0.0)])
+def test_invalid_prices_stop_backtest(column: str, value: float) -> None:
+    frame = sample_market_frame()
+    frame.loc[frame.index[30], column] = value
+
+    with pytest.raises(ValueError, match="无效"):
+        run_moving_average_backtest(frame, BacktestRequest(), "test fixture")

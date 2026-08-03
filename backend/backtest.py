@@ -29,6 +29,16 @@ def run_moving_average_backtest(
         raise ValueError(f"有效行情不足，至少需要 {request.long_window + 3} 根日线")
 
     data = frame.copy().sort_values("trade_date").reset_index(drop=True)
+    for column in ("open", "close", "adj_close"):
+        numeric = pd.to_numeric(data[column], errors="coerce")
+        valid = numeric.map(lambda value: math.isfinite(float(value)) and value > 0)
+        if not bool(valid.all()):
+            first_invalid = data.loc[~valid, "trade_date"].iloc[0]
+            raise ValueError(
+                f"行情在 {pd.Timestamp(first_invalid).date()} 包含无效 {column} 价格，"
+                "回测已停止"
+            )
+        data[column] = numeric
     data["short_ma"] = data["adj_close"].rolling(request.short_window).mean()
     data["long_ma"] = data["adj_close"].rolling(request.long_window).mean()
 

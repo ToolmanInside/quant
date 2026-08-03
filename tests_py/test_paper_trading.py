@@ -464,6 +464,94 @@ def test_version_evaluation_uses_only_matching_daily_market_context() -> None:
     assert with_context["annualized_return"] < without_context["annualized_return"]
 
 
+def test_version_evaluation_is_invariant_to_adjusted_price_anchor() -> None:
+    frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
+    dates = list(pd.bdate_range("2025-01-01", "2025-12-31"))
+    industries = FakeProvider().fetch_industries(SYMBOLS)
+    baseline = _evaluate_version(
+        frames,
+        industries,
+        dates,
+        VERSION_LIBRARY["v1.0-balanced"],
+        "moving_average",
+    )
+    reanchored = {symbol: frame.copy() for symbol, frame in frames.items()}
+    for frame in reanchored.values():
+        for column in ("adj_open", "adj_high", "adj_low", "adj_close"):
+            frame[column] = frame[column] * 0.37
+
+    result = _evaluate_version(
+        reanchored,
+        industries,
+        dates,
+        VERSION_LIBRARY["v1.0-balanced"],
+        "moving_average",
+    )
+
+    assert result == baseline
+
+
+def test_advance_forces_existing_holdings_into_requested_universe(tmp_path) -> None:
+    requested_symbols: list[str] = []
+    requested_start_dates: list[date] = []
+
+    class CapturingProvider(FakeProvider):
+        def fetch_daily(
+            self,
+            symbol: str,
+            start_date: date,
+            end_date: date,
+        ) -> MarketData:
+            requested_symbols.append(symbol)
+            requested_start_dates.append(start_date)
+            return super().fetch_daily(symbol, start_date, end_date)
+
+    store = PaperStore(tmp_path / "paper.txt")
+    store.reset_account(
+        "default",
+        100_000,
+        SYMBOLS,
+        "v1.0-balanced",
+        {
+            "strategy_id": "moving_average",
+            "universe_mode": "full_market",
+            "backtest_start_date": "2024-01-01",
+        },
+    )
+    account = store.account("default")
+    assert account is not None
+    account["last_date"] = "2025-12-29"
+    store.save_account(account)
+    store.save_positions(
+        "default",
+        {
+            SYMBOLS[0]: {
+                "name": SYMBOLS[0],
+                "sector": "测试行业",
+                "shares": 1_000,
+                "avg_price": 10.0,
+                "cost_basis_total": 10_000.0,
+                "entry_date": "2025-12-01",
+            }
+        },
+    )
+
+    result = advance_paper_simulation(
+        PaperAdvanceRequest(
+            account_id="default",
+            symbols=SYMBOLS[1:],
+            as_of_date=date(2025, 12, 31),
+        ),
+        CapturingProvider(),
+        store,
+    )
+
+    assert SYMBOLS[0] in requested_symbols
+    assert set(requested_start_dates) == {date(2025, 5, 3)}
+    assert result["run"]["processed_days"] == 2
+    store.close()
+
+
 def test_multiday_advance_loads_actions_for_symbols_bought_during_catchup(
     tmp_path,
 ) -> None:

@@ -32,6 +32,7 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "momentum_short": 20,
         "momentum_long": 60,
         "breakout_window": 20,
+        "breakout_exit_window": 10,
         "breadth_full": 0.50,
         "breadth_reduced": 0.35,
         "full_exposure": 0.90,
@@ -52,6 +53,7 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "momentum_short": 30,
         "momentum_long": 90,
         "breakout_window": 30,
+        "breakout_exit_window": 10,
         "breadth_full": 0.58,
         "breadth_reduced": 0.42,
         "full_exposure": 0.78,
@@ -72,6 +74,7 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "momentum_short": 15,
         "momentum_long": 45,
         "breakout_window": 15,
+        "breakout_exit_window": 10,
         "breadth_full": 0.46,
         "breadth_reduced": 0.32,
         "full_exposure": 0.88,
@@ -292,6 +295,7 @@ def _feature_row(
         params["long_window"],
         params["momentum_long"],
         params["breakout_window"],
+        params.get("breakout_exit_window", 10),
     )
     if len(history) <= maximum_window:
         return None
@@ -305,7 +309,10 @@ def _feature_row(
     breakout_high = float(
         history["adj_high"].astype(float).iloc[-1 - params["breakout_window"] : -1].max()
     )
-    exit_low = float(history["adj_low"].astype(float).iloc[-11:-1].min())
+    exit_window = int(params.get("breakout_exit_window", 10))
+    exit_low = float(
+        history["adj_low"].astype(float).iloc[-1 - exit_window : -1].min()
+    )
     returns = close.pct_change().tail(20).dropna()
     volatility = float(returns.std(ddof=0) * math.sqrt(252))
     average_amount = float(history["amount"].astype(float).tail(20).mean())
@@ -608,7 +615,9 @@ def _analyze(
                 and float(feature["adj_close"]) < float(feature["exit_low"])
             ):
                 hard_stop = True
-                stop_reason = "收盘跌破10日退出通道"
+                stop_reason = (
+                    f"收盘跌破{int(params.get('breakout_exit_window', 10))}日退出通道"
+                )
         if hard_stop:
             target_weight = 0.0
             action = "CLOSE"
@@ -698,11 +707,24 @@ def _portfolio_value(
     market_value = 0.0
     missing = 0
     for symbol, position in positions.items():
-        row = _last_row_on_or_before(frames[symbol], trade_date)
+        frame = frames.get(symbol)
+        if frame is None:
+            raise ValueError(
+                f"持仓标的 {symbol} 缺少行情数据，已停止当日估值和决策"
+            )
+        row = _last_row_on_or_before(frame, trade_date)
         if row is None:
-            missing += 1
-            continue
-        market_value += position["shares"] * float(row[price_column])
+            raise ValueError(
+                f"持仓标的 {symbol} 在 {trade_date.date()} 之前没有可用价格，"
+                "已停止当日估值和决策"
+            )
+        price = float(row[price_column])
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError(
+                f"持仓标的 {symbol} 在 {trade_date.date()} 的 {price_column} 无效，"
+                "已停止当日估值和决策"
+            )
+        market_value += position["shares"] * price
     return cash + market_value, market_value, missing
 
 
@@ -1380,10 +1402,12 @@ def _evaluate_version(
 
     for trade_date in dates:
         current_closes: dict[str, float] = {}
+        current_raw_closes: dict[str, float] = {}
         for symbol, frame in frames.items():
             row = _row_on(frame, trade_date)
             if row is not None:
                 current_closes[symbol] = float(row["adj_close"])
+                current_raw_closes[symbol] = float(row["close"])
         if previous_closes:
             portfolio_return = sum(
                 weight
@@ -1400,7 +1424,10 @@ def _evaluate_version(
         shadow_positions = {
             symbol: {
                 "shares": 0,
-                "avg_price": current_closes.get(symbol, 1.0),
+                # _analyze evaluates the hard stop against raw_close.  Keep the
+                # shadow position basis in the same raw-price coordinate system;
+                # adjusted prices remain appropriate for relative-return signals.
+                "avg_price": current_raw_closes.get(symbol, 1.0),
                 "name": symbol,
                 "sector": "",
                 "entry_date": "",
@@ -1732,24 +1759,53 @@ def advance_paper_simulation(
         return dashboard
 
     configured_start = account.get("configuration", {}).get("backtest_start_date")
+    universe_mode = account.get("configuration", {}).get("universe_mode", "fixed")
     strategy_id = account.get("configuration", {}).get(
         "strategy_id",
         "moving_average",
     )
-    history_start = (
-        date.fromisoformat(configured_start)
-        if configured_start
-        else last_date - timedelta(days=180)
+    # Full-market catch-up rebuilds a point-in-time candidate set for every
+    # missing day and does not run automatic version promotion.  Loading the
+    # entire configured backtest period on each of those days is unnecessary:
+    # the largest live signal window is 90 sessions.  Keep a generous calendar
+    # buffer for holidays and suspensions.  Fixed-universe mode retains the full
+    # history because its champion/challenger evaluation needs it.
+    if universe_mode == "full_market":
+        history_start = last_date - timedelta(days=240)
+    else:
+        history_start = (
+            date.fromisoformat(configured_start)
+            if configured_start
+            else last_date - timedelta(days=180)
+        )
+    held_symbols = [
+        str(item["symbol"])
+        for item in store.positions(request.account_id)
+        if item.get("symbol")
+    ]
+    pending_symbols = [
+        str(item["symbol"])
+        for item in account.get("pending_plan", [])
+        if item.get("symbol")
+    ]
+    active_symbols = list(
+        dict.fromkeys([*request.symbols, *held_symbols, *pending_symbols])
     )
     frames, errors = _load_frames(
         provider,
-        request.symbols,
+        active_symbols,
         history_start,
         request.as_of_date,
     )
+    missing_held_symbols = [symbol for symbol in held_symbols if symbol not in frames]
+    if missing_held_symbols:
+        raise ValueError(
+            "以下持仓标的缺少行情，已停止本次更新以避免错误估值："
+            + ", ".join(missing_held_symbols)
+        )
     corporate_actions, action_errors = _load_corporate_actions_for_universe(
         provider,
-        request.symbols,
+        active_symbols,
         last_date + timedelta(days=1),
         request.as_of_date,
     )
