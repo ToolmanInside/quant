@@ -601,6 +601,7 @@ def build_markdown_report(
     initial_cash = float(account["initial_cash"])
     current_equity = float(latest["equity"])
     current_return = current_equity / initial_cash - 1
+    configuration = account.get("configuration") or {}
     actual_exposure = (
         float(latest.get("market_value", 0)) / current_equity
         if current_equity > 0
@@ -610,7 +611,6 @@ def build_markdown_report(
         configuration.get("minimum_invested_ratio", 0.0)
     )
     peak_return = float(account["peak_equity"]) / initial_cash - 1
-    configuration = account.get("configuration") or {}
     run = dashboard.get("run") or {}
     processed_days = int(run.get("processed_days", 0))
     run_status = (
