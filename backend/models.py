@@ -123,6 +123,7 @@ class PaperSimulationRequest(BaseModel):
     )
     universe_mode: Literal["fixed", "full_market"] = "fixed"
     risk_profile: Literal["balanced", "aggressive"] = "balanced"
+    minimum_invested_ratio: float = Field(default=0.0, ge=0.0, le=0.95)
     symbols: list[str] = Field(default_factory=lambda: DEFAULT_MATRIX_SYMBOLS.copy())
     backtest_start_date: date = date(2024, 1, 1)
     backtest_end_date: date = date(2025, 12, 31)

@@ -72,6 +72,7 @@ class JobConfig:
     initial_cash: float
     universe_mode: str = "fixed"
     risk_profile: str = "balanced"
+    minimum_invested_ratio: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -163,6 +164,13 @@ def load_unified_config(path: Path) -> UnifiedConfig:
     if risk_profile not in {"balanced", "aggressive"}:
         raise ValueError(
             "paper_account.risk_profile 只能是 balanced 或 aggressive"
+        )
+    minimum_invested_ratio = float(
+        account_payload.get("minimum_invested_ratio", 0.0)
+    )
+    if not 0.0 <= minimum_invested_ratio <= 0.95:
+        raise ValueError(
+            "paper_account.minimum_invested_ratio 必须在 0 到 0.95 之间"
         )
 
     market = payload.get("market_data") or {}
@@ -275,6 +283,7 @@ def load_unified_config(path: Path) -> UnifiedConfig:
             initial_cash=float(account_payload["initial_cash"]),
             universe_mode=universe_mode,
             risk_profile=risk_profile,
+            minimum_invested_ratio=minimum_invested_ratio,
         ),
         tushare_token=_resolve_environment_placeholder(
             market.get("tushare_token"),
@@ -592,6 +601,14 @@ def build_markdown_report(
     initial_cash = float(account["initial_cash"])
     current_equity = float(latest["equity"])
     current_return = current_equity / initial_cash - 1
+    actual_exposure = (
+        float(latest.get("market_value", 0)) / current_equity
+        if current_equity > 0
+        else 0.0
+    )
+    minimum_exposure = float(
+        configuration.get("minimum_invested_ratio", 0.0)
+    )
     peak_return = float(account["peak_equity"]) / initial_cash - 1
     configuration = account.get("configuration") or {}
     run = dashboard.get("run") or {}
@@ -645,6 +662,7 @@ def build_markdown_report(
             "- 策略："
             f"**{configuration.get('strategy_name', configuration.get('strategy_id', '—'))}**；"
             f"风险档 **{RISK_PROFILE_NAMES.get(configuration.get('risk_profile', 'balanced'), configuration.get('risk_profile', 'balanced'))}**；"
+            f"最低仓位 **{minimum_exposure:.0%}**；"
             f"频率 **{configuration.get('frequency', '1d')}**"
         ),
         "",
@@ -665,6 +683,14 @@ def build_markdown_report(
             f"- 风险目标仓位 {float(latest.get('requested_exposure', 0)):.1%}；"
             f"已分配 {float(latest.get('allocated_exposure', 0)):.1%}；"
             f"约束后现金缓冲 {float(latest.get('unallocated_exposure', 0)):.1%}。"
+        ),
+        (
+            f"- 实际仓位 {actual_exposure:.1%}；配置下限 {minimum_exposure:.1%}。"
+            + (
+                " ⚠️ 当前低于下限，详见执行约束并将在下一交易日继续补足。"
+                if actual_exposure + 1e-6 < minimum_exposure
+                else ""
+            )
         ),
         *(
             [
@@ -715,6 +741,9 @@ def build_position_report(
     current_return = equity / initial_cash - 1
     peak_return = float(account["peak_equity"]) / initial_cash - 1
     configuration = account.get("configuration") or {}
+    minimum_exposure = float(
+        configuration.get("minimum_invested_ratio", 0.0)
+    )
     return "\n".join(
         [
             f"### {title}",
@@ -738,7 +767,16 @@ def build_position_report(
                 "- 账户配置：初始资金 "
                 f"**{_money(initial_cash)}**；模拟起点 "
                 f"**{configuration.get('simulation_start_date', '—')}**；风险档 "
-                f"**{RISK_PROFILE_NAMES.get(configuration.get('risk_profile', 'balanced'), configuration.get('risk_profile', 'balanced'))}**"
+                f"**{RISK_PROFILE_NAMES.get(configuration.get('risk_profile', 'balanced'), configuration.get('risk_profile', 'balanced'))}**；"
+                f"最低仓位 **{minimum_exposure:.0%}**"
+            ),
+            *(
+                [
+                    f"- ⚠️ 当前仓位 {position_ratio:.1%} 低于配置下限 "
+                    f"{minimum_exposure:.1%}；午间任务不会提前回填开盘成交。"
+                ]
+                if position_ratio + 1e-6 < minimum_exposure
+                else []
             ),
             "",
             f"#### 持仓明细（{len(dashboard.get('positions') or [])} 个）",
@@ -865,6 +903,8 @@ def _configuration_changed(account: dict[str, Any], config: JobConfig) -> bool:
     return (
         stored.get("strategy_id") != config.strategy_id
         or stored.get("risk_profile", "balanced") != config.risk_profile
+        or float(stored.get("minimum_invested_ratio", 0.0))
+        != config.minimum_invested_ratio
         or stored.get("frequency", "1d") != config.frequency
         or stored.get("universe_mode", config.universe_mode) != config.universe_mode
         or (
@@ -1113,6 +1153,7 @@ def run_daily_job(
                     simulation_end_date=replay_end,
                     initial_cash=config.initial_cash,
                     risk_profile=config.risk_profile,
+                    minimum_invested_ratio=config.minimum_invested_ratio,
                 ),
                 provider,
                 store,

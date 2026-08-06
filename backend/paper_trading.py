@@ -477,6 +477,7 @@ def _analyze(
             "data_quality": data_quality,
             "features": {},
             "requested_exposure": 0.0,
+            "minimum_exposure": float(params.get("minimum_exposure", 0.0)),
             "allocated_exposure": 0.0,
             "unallocated_exposure": 0.0,
             "exposure_constraint": "no_usable_features",
@@ -558,6 +559,11 @@ def _analyze(
     else:
         market_regime = "防守"
         exposure = params["defensive_exposure"]
+    minimum_exposure = min(
+        max(float(params.get("minimum_exposure", 0.0)), 0.0),
+        0.95,
+    )
+    exposure = max(float(exposure), minimum_exposure)
 
     sector_table = (
         table.groupby("sector")
@@ -747,6 +753,7 @@ def _analyze(
         "data_quality": data_quality,
         "features": table.to_dict(orient="index"),
         "requested_exposure": float(exposure),
+        "minimum_exposure": minimum_exposure,
         "allocated_exposure": allocated_exposure,
         "unallocated_exposure": unallocated_exposure,
         "exposure_constraint": exposure_constraint,
@@ -1082,6 +1089,29 @@ def _reviews_for_day(
 ) -> list[dict[str, str]]:
     reviews: list[dict[str, str]] = []
     day = trade_date.date().isoformat()
+    actual_exposure = (
+        float(snapshot.get("market_value", 0)) / float(snapshot.get("equity", 0))
+        if float(snapshot.get("equity", 0)) > 0
+        else 0.0
+    )
+    minimum_exposure = float(snapshot.get("minimum_exposure", 0.0))
+    if actual_exposure + 1e-6 < minimum_exposure:
+        reviews.append(
+            {
+                "trade_date": day,
+                "category": "EXPOSURE_SHORTFALL",
+                "severity": "warning",
+                "diagnosis": "实际持仓低于配置的最低仓位",
+                "evidence": (
+                    f"实际仓位 {actual_exposure:.1%}，"
+                    f"最低要求 {minimum_exposure:.1%}"
+                ),
+                "recommendation": (
+                    "检查是否为模拟首日、无合格趋势信号、涨跌停/停牌拒单或整手约束；"
+                    "下一交易日继续按最低仓位目标补足。"
+                ),
+            }
+        )
     if snapshot["data_quality"] < 0.90 or failed_symbols:
         reviews.append(
             {
@@ -1293,6 +1323,7 @@ def _build_daily_journal(
             "equity": snapshot["equity"],
             "cash": snapshot["cash"],
             "requested_exposure": snapshot.get("requested_exposure"),
+            "minimum_exposure": snapshot.get("minimum_exposure"),
             "allocated_exposure": snapshot.get("allocated_exposure"),
             "unallocated_exposure": snapshot.get("unallocated_exposure"),
             "exposure_constraint": snapshot.get("exposure_constraint"),
@@ -1351,7 +1382,15 @@ def _process_dates(
     processed = 0
 
     for trade_date in dates:
-        params = VERSION_LIBRARY[account["current_version"]]
+        params = {
+            **VERSION_LIBRARY[account["current_version"]],
+            "minimum_exposure": float(
+                account.get("configuration", {}).get(
+                    "minimum_invested_ratio",
+                    0.0,
+                )
+            ),
+        }
         due_plan = list(account.get("pending_plan", []))
         applied_actions = _apply_corporate_actions(
             account,
@@ -1418,6 +1457,7 @@ def _process_dates(
             "top_sectors": analysis["top_sectors"],
             "selected_symbols": analysis["selected_symbols"],
             "requested_exposure": round(analysis["requested_exposure"], 6),
+            "minimum_exposure": round(analysis["minimum_exposure"], 6),
             "allocated_exposure": round(analysis["allocated_exposure"], 6),
             "unallocated_exposure": round(analysis["unallocated_exposure"], 6),
             "exposure_constraint": analysis["exposure_constraint"],
@@ -1583,14 +1623,18 @@ def _automatic_upgrade(
     risk_profile = str(
         account.get("configuration", {}).get("risk_profile", "balanced")
     )
+    minimum_exposure = float(
+        account.get("configuration", {}).get("minimum_invested_ratio", 0.0)
+    )
     for version, params in VERSION_LIBRARY.items():
         if params.get("risk_profile", "balanced") != risk_profile:
             continue
+        effective_params = {**params, "minimum_exposure": minimum_exposure}
         metrics = _evaluate_version(
             frames,
             industries,
             evaluation_dates,
-            params,
+            effective_params,
             strategy_id,
             market_context_by_date,
             float(account.get("initial_cash", 500_000)),
@@ -1600,7 +1644,7 @@ def _automatic_upgrade(
             account["account_id"],
             version,
             "champion" if version == account["current_version"] else "challenger",
-            params,
+            effective_params,
             metrics,
             "固定规则挑战者；仅在模拟样本外满足门槛时晋级。",
         )
@@ -1740,6 +1784,7 @@ def replay_paper_simulation(
         "strategy_id": request.strategy_id,
         "strategy_name": STRATEGY_NAMES[request.strategy_id],
         "risk_profile": request.risk_profile,
+        "minimum_invested_ratio": request.minimum_invested_ratio,
         "frequency": "1d",
         "universe_mode": request.universe_mode,
         "backtest_start_date": request.backtest_start_date.isoformat(),

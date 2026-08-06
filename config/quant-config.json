@@ -41,6 +41,7 @@
     "account_id": "github-actions",
     "strategy_id": "moving_average",
     "risk_profile": "aggressive",
+    "minimum_invested_ratio": 0.70,
     "frequency": "1d",
     "symbols": [
       "159611.SZ",

@@ -82,6 +82,7 @@ type PaperDashboard = {
       strategy_id?: "moving_average" | "momentum" | "breakout";
       strategy_name?: string;
       risk_profile?: "balanced" | "aggressive";
+      minimum_invested_ratio?: number;
       frequency?: "1d";
       backtest_start_date?: string;
       backtest_end_date?: string;
@@ -194,6 +195,7 @@ type PaperForm = {
   account_id: string;
   strategy_id: "moving_average" | "momentum" | "breakout";
   risk_profile: "balanced" | "aggressive";
+  minimum_invested_ratio: number;
   symbols: string;
   backtest_start_date: string;
   backtest_end_date: string;
@@ -300,6 +302,7 @@ export function PaperTrading() {
     account_id: "default",
     strategy_id: "moving_average",
     risk_profile: "balanced",
+    minimum_invested_ratio: 0,
     symbols: DEFAULT_SYMBOLS,
     backtest_start_date: "2024-01-01",
     backtest_end_date: "2025-12-31",
@@ -324,6 +327,9 @@ export function PaperTrading() {
             value.account.configuration.strategy_id ?? current.strategy_id,
           risk_profile:
             value.account.configuration.risk_profile ?? current.risk_profile,
+          minimum_invested_ratio:
+            value.account.configuration.minimum_invested_ratio ??
+            current.minimum_invested_ratio,
           backtest_start_date:
             value.account.configuration.backtest_start_date ??
             current.backtest_start_date,
@@ -490,6 +496,25 @@ export function PaperTrading() {
             </select>
             <small className="paper-strategy-description">
               依次对应进攻、谨慎和防守市场；进取型仍保留单票25%和最多5只的上限。
+            </small>
+          </label>
+          <label>
+            最低持仓比例
+            <input
+              type="number"
+              min={0}
+              max={95}
+              step={5}
+              value={Math.round(form.minimum_invested_ratio * 100)}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  minimum_invested_ratio: Number(event.target.value) / 100,
+                })
+              }
+            />
+            <small className="paper-strategy-description">
+              当前设置为 {ratio.format(form.minimum_invested_ratio)}；无合格信号或无法成交时会记录仓位缺口，不会强买。
             </small>
           </label>
           <p className="paper-stage-label">① 回测期 · 只评估策略</p>
