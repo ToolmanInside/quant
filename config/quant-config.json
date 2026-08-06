@@ -40,6 +40,7 @@
   "paper_account": {
     "account_id": "github-actions",
     "strategy_id": "moving_average",
+    "risk_profile": "aggressive",
     "frequency": "1d",
     "symbols": [
       "159611.SZ",

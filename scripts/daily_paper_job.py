@@ -40,6 +40,10 @@ ACTION_NAMES = {
     "SELL": "卖出 / 减仓",
     "CLOSE": "平仓",
 }
+RISK_PROFILE_NAMES = {
+    "balanced": "均衡型",
+    "aggressive": "进取型",
+}
 CONSTRAINT_NAMES = {
     "limit_up_locked": "一字涨停，买入无法成交",
     "limit_down_locked": "一字跌停，卖出无法成交",
@@ -67,6 +71,7 @@ class JobConfig:
     simulation_start_date: date
     initial_cash: float
     universe_mode: str = "fixed"
+    risk_profile: str = "balanced"
 
 
 @dataclass(frozen=True)
@@ -154,6 +159,11 @@ def load_unified_config(path: Path) -> UnifiedConfig:
     frequency = str(account_payload.get("frequency", "1d"))
     if frequency != "1d":
         raise ValueError("当前模拟盘只支持日频 frequency=1d")
+    risk_profile = str(account_payload.get("risk_profile", "balanced"))
+    if risk_profile not in {"balanced", "aggressive"}:
+        raise ValueError(
+            "paper_account.risk_profile 只能是 balanced 或 aggressive"
+        )
 
     market = payload.get("market_data") or {}
     if market.get("provider", "tushare") != "tushare":
@@ -264,6 +274,7 @@ def load_unified_config(path: Path) -> UnifiedConfig:
             ),
             initial_cash=float(account_payload["initial_cash"]),
             universe_mode=universe_mode,
+            risk_profile=risk_profile,
         ),
         tushare_token=_resolve_environment_placeholder(
             market.get("tushare_token"),
@@ -363,7 +374,22 @@ def _plan_lines(
     plan = dashboard["account"].get("pending_plan") or []
     if not plan:
         return ["- **无新增交易指令**：下一交易日维持当前持仓/空仓，等待新信号。"]
-    lines = []
+    latest = dashboard.get("latest") or {}
+    target_exposure = float(
+        latest.get("allocated_exposure")
+        or sum(
+            float(item.get("target_weight", 0))
+            for item in plan
+            if item.get("action") != "CLOSE"
+        )
+    )
+    signal_date = str(plan[0].get("signal_date") or "最近信号日")
+    lines = [
+        (
+            f"- **待执行目标总仓位 {target_exposure:.1%}**；"
+            f"{signal_date} 收盘确认，下一交易日开盘模拟成交。"
+        )
+    ]
     # 交易计划属于必须完整披露的信息。企业微信超长内容由发送层分段处理。
     for item in plan:
         action = ACTION_NAMES.get(item["action"], item["action"])
@@ -388,6 +414,7 @@ def _execution_reconciliation_lines(dashboard: dict[str, Any]) -> list[str]:
         return ["- 今日没有到期交易计划。"]
     lines: list[str] = []
     for item in reconciliation:
+        action = ACTION_NAMES.get(item.get("action"), item.get("action", "交易"))
         status = (
             "完成"
             if float(item.get("fill_ratio", 0)) >= 1
@@ -400,7 +427,8 @@ def _execution_reconciliation_lines(dashboard: dict[str, Any]) -> list[str]:
         warning_key = item.get("tradability_warning")
         warning = CONSTRAINT_NAMES.get(warning_key, warning_key or "")
         lines.append(
-            f"- `{item['symbol']}` {status}：计划 {int(item.get('planned_quantity', 0)):,} 股，"
+            f"- **{action}** `{item['symbol']}` {status}："
+            f"计划 {int(item.get('planned_quantity', 0)):,} 股，"
             f"实际 {int(item.get('actual_quantity', 0)):,} 股；"
             f"实际仓位 {float(item.get('actual_weight', 0)):.1%}；约束 {constraint}"
             f"{'；提示 ' + warning if warning else ''}。"
@@ -616,6 +644,7 @@ def build_markdown_report(
         (
             "- 策略："
             f"**{configuration.get('strategy_name', configuration.get('strategy_id', '—'))}**；"
+            f"风险档 **{RISK_PROFILE_NAMES.get(configuration.get('risk_profile', 'balanced'), configuration.get('risk_profile', 'balanced'))}**；"
             f"频率 **{configuration.get('frequency', '1d')}**"
         ),
         "",
@@ -636,6 +665,15 @@ def build_markdown_report(
             f"- 风险目标仓位 {float(latest.get('requested_exposure', 0)):.1%}；"
             f"已分配 {float(latest.get('allocated_exposure', 0)):.1%}；"
             f"约束后现金缓冲 {float(latest.get('unallocated_exposure', 0)):.1%}。"
+        ),
+        *(
+            [
+                "- 整手可执行性：已跳过 "
+                f"{len(latest.get('unaffordable_symbols') or [])} 个在当前资金规模下"
+                "无法按单票上限买入一手的高价标的，并将预算重新分配。"
+            ]
+            if latest.get("unaffordable_symbols")
+            else []
         ),
         f"- 优选板块：{sectors}",
         *(
@@ -699,7 +737,8 @@ def build_position_report(
             (
                 "- 账户配置：初始资金 "
                 f"**{_money(initial_cash)}**；模拟起点 "
-                f"**{configuration.get('simulation_start_date', '—')}**"
+                f"**{configuration.get('simulation_start_date', '—')}**；风险档 "
+                f"**{RISK_PROFILE_NAMES.get(configuration.get('risk_profile', 'balanced'), configuration.get('risk_profile', 'balanced'))}**"
             ),
             "",
             f"#### 持仓明细（{len(dashboard.get('positions') or [])} 个）",
@@ -708,7 +747,10 @@ def build_position_report(
             "#### 已生成的下一步计划",
             *_plan_lines(dashboard),
             "",
-            "> 午间任务只读账户文本，不推进策略、不产生模拟成交。",
+            (
+                "> 午间任务只读上一份已完成的日线账本，不推进策略、不产生模拟成交；"
+                "上方计划要到下一次日终任务取得完整日线后，才会按下一交易日开盘价回填成交。"
+            ),
         ]
     )
 
@@ -822,6 +864,7 @@ def _configuration_changed(account: dict[str, Any], config: JobConfig) -> bool:
     stored = account.get("configuration") or {}
     return (
         stored.get("strategy_id") != config.strategy_id
+        or stored.get("risk_profile", "balanced") != config.risk_profile
         or stored.get("frequency", "1d") != config.frequency
         or stored.get("universe_mode", config.universe_mode) != config.universe_mode
         or (
@@ -1069,6 +1112,7 @@ def run_daily_job(
                     simulation_start_date=config.simulation_start_date,
                     simulation_end_date=replay_end,
                     initial_cash=config.initial_cash,
+                    risk_profile=config.risk_profile,
                 ),
                 provider,
                 store,

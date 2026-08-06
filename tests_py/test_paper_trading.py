@@ -8,6 +8,7 @@ from backend.models import PaperAdvanceRequest, PaperSimulationRequest
 from backend.paper_store import PaperStore
 from backend.paper_trading import (
     PaperCosts,
+    RISK_PROFILE_INITIAL_VERSION,
     VERSION_LIBRARY,
     _allocate_capped_weights,
     _apply_corporate_actions,
@@ -257,6 +258,70 @@ def test_position_caps_redistribute_instead_of_losing_exposure() -> None:
     assert abs(sum(weights.values()) - 0.60) < 1e-9
     assert weights["A"] == 0.22
     assert all(weight <= 0.22 for weight in weights.values())
+
+
+def test_weight_allocator_reserves_an_executable_board_lot() -> None:
+    weights = _allocate_capped_weights(
+        {"A": 1.0, "B": 1.0, "C": 1.0},
+        target_exposure=0.75,
+        position_cap=0.30,
+        minimum_weights={"A": 0.18, "B": 0.05, "C": 0.02},
+    )
+
+    assert abs(sum(weights.values()) - 0.75) < 1e-9
+    assert weights["A"] >= 0.18
+    assert weights["B"] >= 0.05
+    assert weights["C"] >= 0.02
+    assert all(weight <= 0.30 for weight in weights.values())
+
+
+def test_aggressive_profile_raises_defensive_exposure() -> None:
+    frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
+    result = _analyze(
+        pd.Timestamp("2025-12-31"),
+        frames,
+        FakeProvider().fetch_industries(SYMBOLS),
+        VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        {},
+        100_000,
+        "moving_average",
+        {"technical_breadth": {"composite": 0.10, "coverage": 0.95}},
+    )
+
+    assert result["market_regime"] == "防守"
+    assert result["requested_exposure"] == 0.35
+    assert result["allocated_exposure"] > 0.30
+
+
+def test_analysis_skips_symbols_whose_board_lot_exceeds_position_cap() -> None:
+    frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
+    for frame in frames.values():
+        for column in (
+            "open",
+            "high",
+            "low",
+            "close",
+            "adj_open",
+            "adj_high",
+            "adj_low",
+            "adj_close",
+        ):
+            frame[column] *= 50
+        frame["amount"] *= 50
+
+    result = _analyze(
+        pd.Timestamp("2025-12-31"),
+        frames,
+        FakeProvider().fetch_industries(SYMBOLS),
+        VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        {},
+        100_000,
+        "moving_average",
+    )
+
+    assert not result["target_weights"]
+    assert result["unaffordable_symbols"]
+    assert result["exposure_constraint"] == "board_lot_affordability"
 
 
 def test_full_market_medium_term_breadth_controls_regime() -> None:

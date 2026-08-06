@@ -122,6 +122,7 @@ class PaperSimulationRequest(BaseModel):
         "moving_average"
     )
     universe_mode: Literal["fixed", "full_market"] = "fixed"
+    risk_profile: Literal["balanced", "aggressive"] = "balanced"
     symbols: list[str] = Field(default_factory=lambda: DEFAULT_MATRIX_SYMBOLS.copy())
     backtest_start_date: date = date(2024, 1, 1)
     backtest_end_date: date = date(2025, 12, 31)

@@ -81,6 +81,7 @@ type PaperDashboard = {
     configuration: {
       strategy_id?: "moving_average" | "momentum" | "breakout";
       strategy_name?: string;
+      risk_profile?: "balanced" | "aggressive";
       frequency?: "1d";
       backtest_start_date?: string;
       backtest_end_date?: string;
@@ -192,6 +193,7 @@ type PaperDashboard = {
 type PaperForm = {
   account_id: string;
   strategy_id: "moving_average" | "momentum" | "breakout";
+  risk_profile: "balanced" | "aggressive";
   symbols: string;
   backtest_start_date: string;
   backtest_end_date: string;
@@ -297,6 +299,7 @@ export function PaperTrading() {
   const [form, setForm] = useState<PaperForm>({
     account_id: "default",
     strategy_id: "moving_average",
+    risk_profile: "balanced",
     symbols: DEFAULT_SYMBOLS,
     backtest_start_date: "2024-01-01",
     backtest_end_date: "2025-12-31",
@@ -319,6 +322,8 @@ export function PaperTrading() {
           initial_cash: value.account.initial_cash,
           strategy_id:
             value.account.configuration.strategy_id ?? current.strategy_id,
+          risk_profile:
+            value.account.configuration.risk_profile ?? current.risk_profile,
           backtest_start_date:
             value.account.configuration.backtest_start_date ??
             current.backtest_start_date,
@@ -467,6 +472,24 @@ export function PaperTrading() {
             <small className="paper-strategy-description">
               {PAPER_STRATEGIES[form.strategy_id].description} 固定为每日收盘计算；
               修改后需重新初始化账户。
+            </small>
+          </label>
+          <label>
+            投资风险档
+            <select
+              value={form.risk_profile}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  risk_profile: event.target.value as PaperForm["risk_profile"],
+                })
+              }
+            >
+              <option value="balanced">均衡型（90% / 45% / 15%）</option>
+              <option value="aggressive">进取型（95% / 75% / 35%）</option>
+            </select>
+            <small className="paper-strategy-description">
+              依次对应进攻、谨慎和防守市场；进取型仍保留单票25%和最多5只的上限。
             </small>
           </label>
           <p className="paper-stage-label">① 回测期 · 只评估策略</p>

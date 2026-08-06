@@ -182,6 +182,7 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.wechat_webhook_url.endswith("key=test")
     assert config.paper_account.frequency == "1d"
     assert config.paper_account.strategy_id == "moving_average"
+    assert config.paper_account.risk_profile == "aggressive"
     assert config.position_report_at == "12:00"
     assert config.daily_close_at == "18:00"
     assert config.state_directory.as_posix() == ".quant-state/accounts"

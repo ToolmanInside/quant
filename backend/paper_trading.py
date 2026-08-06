@@ -26,6 +26,7 @@ STRATEGY_NAMES = {
 VERSION_LIBRARY: dict[str, dict[str, Any]] = {
     "v1.0-balanced": {
         "name": "均衡型中短期趋势",
+        "risk_profile": "balanced",
         "fast_window": 5,
         "slow_window": 20,
         "long_window": 60,
@@ -47,6 +48,7 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
     },
     "v1.1-defensive": {
         "name": "防守型趋势",
+        "risk_profile": "balanced",
         "fast_window": 10,
         "slow_window": 30,
         "long_window": 90,
@@ -68,6 +70,7 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
     },
     "v1.2-responsive": {
         "name": "灵敏型趋势",
+        "risk_profile": "balanced",
         "fast_window": 3,
         "slow_window": 15,
         "long_window": 45,
@@ -87,6 +90,34 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "minimum_amount": 20_000_000,
         "minimum_score": 0.50,
     },
+    "v1.0-aggressive": {
+        "name": "进取型中短期趋势",
+        "risk_profile": "aggressive",
+        "fast_window": 5,
+        "slow_window": 20,
+        "long_window": 60,
+        "momentum_short": 20,
+        "momentum_long": 60,
+        "breakout_window": 20,
+        "breakout_exit_window": 10,
+        "breadth_full": 0.45,
+        "breadth_reduced": 0.25,
+        "full_exposure": 0.95,
+        "reduced_exposure": 0.75,
+        "defensive_exposure": 0.35,
+        "max_positions": 5,
+        "max_per_sector": 2,
+        "max_position_weight": 0.25,
+        "stop_loss": 0.09,
+        "minimum_amount": 20_000_000,
+        "minimum_score": 0.48,
+        "board_lot_price_buffer": 1.10,
+    },
+}
+
+RISK_PROFILE_INITIAL_VERSION = {
+    "balanced": "v1.0-balanced",
+    "aggressive": "v1.0-aggressive",
 }
 
 
@@ -348,8 +379,9 @@ def _allocate_capped_weights(
     raw_scores: dict[str, float],
     target_exposure: float,
     position_cap: float,
+    minimum_weights: dict[str, float] | None = None,
 ) -> dict[str, float]:
-    """Water-fill weights so a cap does not silently destroy exposure."""
+    """Water-fill weights while respecting caps and executable lot floors."""
     scores = {
         symbol: max(float(score), 0.0)
         for symbol, score in raw_scores.items()
@@ -357,9 +389,19 @@ def _allocate_capped_weights(
     }
     if not scores or target_exposure <= 0 or position_cap <= 0:
         return {}
-    remaining = min(float(target_exposure), len(scores) * float(position_cap))
+    minimums = {
+        symbol: max(float((minimum_weights or {}).get(symbol, 0.0)), 0.0)
+        for symbol in scores
+    }
+    if any(weight > position_cap + 1e-12 for weight in minimums.values()):
+        raise ValueError("minimum weight exceeds the per-position cap")
+    exposure_limit = min(float(target_exposure), len(scores) * float(position_cap))
+    minimum_total = sum(minimums.values())
+    if minimum_total > exposure_limit + 1e-12:
+        raise ValueError("minimum weights exceed the target exposure")
+    remaining = exposure_limit - minimum_total
     active = dict(scores)
-    allocated: dict[str, float] = {}
+    allocated: dict[str, float] = dict(minimums)
     while active and remaining > 1e-12:
         total_score = sum(active.values())
         proposed = {
@@ -369,14 +411,16 @@ def _allocate_capped_weights(
         capped = [
             symbol
             for symbol, weight in proposed.items()
-            if weight > position_cap + 1e-12
+            if weight > position_cap - allocated[symbol] + 1e-12
         ]
         if not capped:
-            allocated.update(proposed)
+            for symbol, weight in proposed.items():
+                allocated[symbol] += weight
             break
         for symbol in capped:
+            headroom = float(position_cap) - allocated[symbol]
             allocated[symbol] = float(position_cap)
-            remaining -= float(position_cap)
+            remaining -= headroom
             active.pop(symbol)
     return allocated
 
@@ -390,6 +434,7 @@ def _analyze(
     equity: float,
     strategy_id: str,
     market_context: dict[str, Any] | None = None,
+    position_sizing_equity: float | None = None,
 ) -> dict[str, Any]:
     feature_rows: list[dict[str, Any]] = []
     for symbol, frame in frames.items():
@@ -435,6 +480,7 @@ def _analyze(
             "allocated_exposure": 0.0,
             "unallocated_exposure": 0.0,
             "exposure_constraint": "no_usable_features",
+            "unaffordable_symbols": [],
         }
 
     table = pd.DataFrame(feature_rows).set_index("symbol")
@@ -537,12 +583,39 @@ def _analyze(
         table["eligible"] & table["sector"].isin(allowed_sectors)
     ].sort_values("score", ascending=False)
     selected: list[str] = []
+    minimum_weights: dict[str, float] = {}
+    unaffordable_symbols: list[str] = []
     sector_counts: dict[str, int] = {}
+    sizing_equity = (
+        float(position_sizing_equity)
+        if position_sizing_equity is not None and position_sizing_equity > 0
+        else float(equity)
+    )
     for symbol, row in eligible.iterrows():
         sector = str(row["sector"])
         if sector_counts.get(sector, 0) >= params["max_per_sector"]:
             continue
-        selected.append(str(symbol))
+        symbol = str(symbol)
+        # A continuous target weight is meaningless if the account cannot buy
+        # even one A-share board lot.  Reserve enough weight for one lot with
+        # opening-gap headroom, otherwise skip the symbol and keep scanning the
+        # ranked list so its budget can be reassigned to an executable name.
+        minimum_weight = 0.0
+        if symbol not in positions and sizing_equity > 0:
+            minimum_weight = (
+                100
+                * float(row["raw_close"])
+                * float(params.get("board_lot_price_buffer", 1.10))
+                / sizing_equity
+            )
+        if minimum_weight > params["max_position_weight"] + 1e-12:
+            unaffordable_symbols.append(symbol)
+            continue
+        if sum(minimum_weights.values()) + minimum_weight > exposure + 1e-12:
+            unaffordable_symbols.append(symbol)
+            continue
+        selected.append(symbol)
+        minimum_weights[symbol] = minimum_weight
         sector_counts[sector] = sector_counts.get(sector, 0) + 1
         if len(selected) >= params["max_positions"]:
             break
@@ -557,12 +630,15 @@ def _analyze(
             inverse_volatility,
             exposure,
             params["max_position_weight"],
+            minimum_weights,
         )
     allocated_exposure = float(sum(target_weights.values()))
     unallocated_exposure = max(float(exposure) - allocated_exposure, 0.0)
     exposure_constraint = (
         "position_count_times_cap"
         if unallocated_exposure > 1e-8 and selected
+        else "board_lot_affordability"
+        if unallocated_exposure > 1e-8 and unaffordable_symbols
         else "no_eligible_symbols"
         if unallocated_exposure > 1e-8
         else None
@@ -674,6 +750,7 @@ def _analyze(
         "allocated_exposure": allocated_exposure,
         "unallocated_exposure": unallocated_exposure,
         "exposure_constraint": exposure_constraint,
+        "unaffordable_symbols": unaffordable_symbols,
     }
 
 
@@ -1344,6 +1421,7 @@ def _process_dates(
             "allocated_exposure": round(analysis["allocated_exposure"], 6),
             "unallocated_exposure": round(analysis["unallocated_exposure"], 6),
             "exposure_constraint": analysis["exposure_constraint"],
+            "unaffordable_symbols": analysis.get("unaffordable_symbols", []),
             "strategy_version": account["current_version"],
         }
         store.add_snapshot(account["account_id"], snapshot)
@@ -1390,6 +1468,7 @@ def _evaluate_version(
     params: dict[str, Any],
     strategy_id: str,
     market_context_by_date: dict[pd.Timestamp, dict[str, Any]] | None = None,
+    position_sizing_equity: float = 500_000,
 ) -> dict[str, Any]:
     equity = 1.0
     equity_values: list[float] = []
@@ -1443,6 +1522,7 @@ def _evaluate_version(
             equity,
             strategy_id,
             (market_context_by_date or {}).get(trade_date.normalize()),
+            position_sizing_equity,
         )
         new_weights = analysis["target_weights"]
         turnover = sum(
@@ -1500,7 +1580,12 @@ def _automatic_upgrade(
             current_context
         )
     metrics_by_version: dict[str, dict[str, Any]] = {}
+    risk_profile = str(
+        account.get("configuration", {}).get("risk_profile", "balanced")
+    )
     for version, params in VERSION_LIBRARY.items():
+        if params.get("risk_profile", "balanced") != risk_profile:
+            continue
         metrics = _evaluate_version(
             frames,
             industries,
@@ -1508,6 +1593,7 @@ def _automatic_upgrade(
             params,
             strategy_id,
             market_context_by_date,
+            float(account.get("initial_cash", 500_000)),
         )
         metrics_by_version[version] = metrics
         store.save_version(
@@ -1533,6 +1619,9 @@ def _automatic_upgrade(
         ),
         reverse=True,
     )
+    if not candidates:
+        store.save_account(account)
+        return
     target, candidate = candidates[0]
     sample_sufficient = len(frames) >= 20 and len(evaluation_dates) >= 504
     qualifies = (
@@ -1650,6 +1739,7 @@ def replay_paper_simulation(
     configuration = {
         "strategy_id": request.strategy_id,
         "strategy_name": STRATEGY_NAMES[request.strategy_id],
+        "risk_profile": request.risk_profile,
         "frequency": "1d",
         "universe_mode": request.universe_mode,
         "backtest_start_date": request.backtest_start_date.isoformat(),
@@ -1657,20 +1747,21 @@ def replay_paper_simulation(
         "simulation_start_date": request.simulation_start_date.isoformat(),
         "simulation_end_date": request.simulation_end_date.isoformat(),
     }
+    initial_version = RISK_PROFILE_INITIAL_VERSION[request.risk_profile]
     store.reset_account(
         request.account_id,
         request.initial_cash,
         request.symbols,
-        "v1.0-balanced",
+        initial_version,
         configuration,
     )
     store.save_version(
         request.account_id,
-        "v1.0-balanced",
+        initial_version,
         "champion",
-        VERSION_LIBRARY["v1.0-balanced"],
+        VERSION_LIBRARY[initial_version],
         {},
-        "初始可解释基线版本。",
+        "按账户风险档选择的初始可解释基线版本。",
     )
     account = store.account(request.account_id)
     assert account is not None
