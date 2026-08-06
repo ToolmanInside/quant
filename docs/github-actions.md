@@ -26,6 +26,9 @@
 
 `paper_account.risk_profile` 支持 `balanced`（均衡型）和 `aggressive`（进取型）。
 修改风险档会被视为账户配置变化，并按模拟起点重新回放账本。
+`paper_account.minimum_invested_ratio` 设置最低目标仓位，当前为 `0.70`。没有合格趋势
+信号或订单因涨跌停、停牌、整手约束无法成交时，系统不会强买，但会记录仓位缺口并在
+后续交易日继续尝试补足。
 
 所有运行配置只读取 `config/quant-config.json`，不存在示例文件回退逻辑。
 

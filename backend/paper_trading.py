@@ -1249,12 +1249,21 @@ def _build_daily_journal(
         next_focus = "观察信号是否连续失效，并交给挑战者做样本外比较。"
     elif snapshot["market_regime"] == "防守":
         category = "MARKET"
-        conclusion = "市场环境偏弱，保持低仓位或空仓属于主动决策。"
+        conclusion = (
+            "市场环境偏弱，但账户配置要求维持最低仓位；"
+            "只在有效趋势标的中完成最低暴露，不以空仓作为目标。"
+            if float(snapshot.get("minimum_exposure", 0.0)) > 0
+            else "市场环境偏弱，保持低仓位或空仓属于主动决策。"
+        )
         evidence = [
             f"趋势宽度 {snapshot['breadth']:.1%}",
             f"账户回撤 {snapshot['drawdown']:.1%}",
         ]
-        next_focus = "等待趋势宽度恢复，不因无成交而放宽入场条件。"
+        next_focus = (
+            "优先补足最低仓位，同时继续执行趋势退出和成交约束。"
+            if float(snapshot.get("minimum_exposure", 0.0)) > 0
+            else "等待趋势宽度恢复，不因无成交而放宽入场条件。"
+        )
     else:
         category = "NORMAL"
         conclusion = "当日数据、执行和策略表现未发现显著异常。"
@@ -1270,8 +1279,16 @@ def _build_daily_journal(
             for item in next_plan
         )
     elif positions:
+        actual_exposure = (
+            float(snapshot.get("market_value", 0)) / float(snapshot.get("equity", 0))
+            if float(snapshot.get("equity", 0)) > 0
+            else 0.0
+        )
         decision_summary = (
-            "无操作：防守状态下现有低仓位与风险目标接近，继续持有。"
+            "无操作：没有更多标的满足趋势与成交条件，最低仓位暂未补足。"
+            if actual_exposure + 1e-6
+            < float(snapshot.get("minimum_exposure", 0.0))
+            else "无操作：防守状态下现有仓位与风险目标接近，继续持有。"
             if snapshot["market_regime"] == "防守"
             else "无操作：现有持仓与目标仓位接近，继续持有。"
         )

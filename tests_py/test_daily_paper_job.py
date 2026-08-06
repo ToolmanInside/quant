@@ -26,6 +26,7 @@ def dashboard_fixture() -> dict:
             "configuration": {
                 "strategy_id": "moving_average",
                 "strategy_name": "双均线趋势",
+                "minimum_invested_ratio": 0.70,
                 "frequency": "1d",
                 "backtest_start_date": "2024-01-01",
                 "backtest_end_date": "2025-12-31",
@@ -84,20 +85,24 @@ def test_report_contains_account_holdings_returns_and_plan() -> None:
     assert "2024-01-01" in report
     assert "2025-12-31" in report
     assert "模拟盘起点：**2026-01-01**" in report
+    assert "最低仓位 **70%**" in report
 
 
 def test_midday_report_is_explicitly_read_only_and_not_realtime() -> None:
+    dashboard = dashboard_fixture()
+    dashboard["latest"]["market_value"] = 300_000
     report = build_position_report(
-        dashboard_fixture(),
+        dashboard,
         generated_at=datetime(2026, 7, 31, 12, 0),
     )
 
     assert "午间盘位报告" in report
-    assert "总仓位：**78.2%**" in report
+    assert "总仓位：**54.5%**" in report
     assert "当前收益：**+10.00%**" in report
     assert "历史最高收益：**+15.00%**" in report
     assert "不是盘中实时价格或实时盈亏" in report
     assert "不推进策略、不产生模拟成交" in report
+    assert "低于配置下限 70.0%" in report
 
 
 def test_wechat_payload_uses_markdown_and_checks_success() -> None:
@@ -183,6 +188,7 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.paper_account.frequency == "1d"
     assert config.paper_account.strategy_id == "moving_average"
     assert config.paper_account.risk_profile == "aggressive"
+    assert config.paper_account.minimum_invested_ratio == 0.70
     assert config.position_report_at == "12:00"
     assert config.daily_close_at == "18:00"
     assert config.state_directory.as_posix() == ".quant-state/accounts"

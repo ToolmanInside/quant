@@ -293,6 +293,29 @@ def test_aggressive_profile_raises_defensive_exposure() -> None:
     assert result["allocated_exposure"] > 0.30
 
 
+def test_configured_minimum_exposure_overrides_defensive_target() -> None:
+    frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
+    params = {
+        **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        "minimum_exposure": 0.70,
+    }
+    result = _analyze(
+        pd.Timestamp("2025-12-31"),
+        frames,
+        FakeProvider().fetch_industries(SYMBOLS),
+        params,
+        {},
+        100_000,
+        "moving_average",
+        {"technical_breadth": {"composite": 0.10, "coverage": 0.95}},
+    )
+
+    assert result["market_regime"] == "防守"
+    assert result["minimum_exposure"] == 0.70
+    assert result["requested_exposure"] == 0.70
+    assert result["allocated_exposure"] > 0.65
+
+
 def test_analysis_skips_symbols_whose_board_lot_exceeds_position_cap() -> None:
     frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
     for frame in frames.values():

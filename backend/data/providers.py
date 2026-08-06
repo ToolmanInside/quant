@@ -410,7 +410,7 @@ class TushareDataProvider:
         snapshot["trade_date"] = pd.to_datetime(
             snapshot["trade_date"],
             format="%Y%m%d",
-        )
+        ).astype("datetime64[ns]")
         return trade_date, snapshot, errors
 
     def fetch_market_technical_breadth(
@@ -562,10 +562,12 @@ class TushareDataProvider:
         if "ann_date" in frame.columns:
             announcement_dates = pd.to_datetime(
                 frame["ann_date"].astype(str),
-                format="%Y%m%d",
+                format="mixed",
                 errors="coerce",
-            )
-            frame = frame[announcement_dates.dt.date <= trade_date]
+            ).astype("datetime64[ns]")
+            frame = frame[
+                announcement_dates <= pd.Timestamp(trade_date).as_unit("ns")
+            ]
         if frame.empty:
             return frame.reset_index(drop=True)
         sort_columns = [

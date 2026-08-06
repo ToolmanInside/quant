@@ -104,12 +104,13 @@ def score_market_snapshot(
     ).fillna("未分类")
     table["amount_yuan"] = pd.to_numeric(table["amount"], errors="coerce") * 1_000
     list_dates = pd.to_datetime(
-        _column(table, "list_date"),
-        format="%Y%m%d",
+        _column(table, "list_date").astype(str),
+        format="mixed",
         errors="coerce",
-    )
+    ).astype("datetime64[ns]")
+    normalized_trade_date = pd.Timestamp(trade_date).as_unit("ns")
     listing_days = (
-        pd.Timestamp(trade_date) - list_dates
+        normalized_trade_date - list_dates
     ).dt.days.fillna(config.minimum_listing_days)
     table["listing_days"] = listing_days
     table["pct_chg"] = pd.to_numeric(_column(table, "pct_chg"), errors="coerce")

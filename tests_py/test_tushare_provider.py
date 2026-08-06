@@ -124,3 +124,30 @@ def test_quality_cache_keeps_raw_rows_and_filters_each_as_of_date(
     assert later.loc[0, "roe"] == 20.0
     assert historical.loc[0, "roe"] == 10.0
     assert (tmp_path / "market_quality_raw_20251231.csv").exists()
+
+
+def test_quality_filter_accepts_second_resolution_announcement_dates(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class DatetimePro(FakePro):
+        def fina_indicator_vip(self, **kwargs):
+            return pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "000002.SZ"],
+                    "ann_date": pd.Series(
+                        ["2026-04-10", "2026-04-25"],
+                        dtype="datetime64[s]",
+                    ),
+                    "end_date": [kwargs["period"], kwargs["period"]],
+                    "roe": [10.0, 20.0],
+                }
+            )
+
+    monkeypatch.setattr(providers, "CACHE_DIR", tmp_path)
+    provider = object.__new__(TushareDataProvider)
+    provider._pro = DatetimePro()
+
+    result = provider._fetch_quality_snapshot(date(2026, 4, 20), [])
+
+    assert list(result["ts_code"]) == ["000001.SZ"]

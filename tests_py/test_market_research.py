@@ -76,6 +76,29 @@ def test_full_market_factor_screen_has_coverage_sectors_and_candidates() -> None
     )
 
 
+def test_full_market_accepts_second_resolution_datetime_columns() -> None:
+    snapshot = _snapshot()
+    snapshot["trade_date"] = pd.to_datetime(
+        snapshot["trade_date"],
+        format="%Y%m%d",
+    ).astype("datetime64[s]")
+    snapshot["list_date"] = pd.to_datetime(
+        snapshot["list_date"],
+        format="%Y%m%d",
+    ).astype("datetime64[s]")
+
+    result = score_market_snapshot(
+        snapshot,
+        date(2026, 7, 31),
+        MarketUniverseConfig(
+            mode="full_market",
+            minimum_daily_amount=50_000_000,
+        ),
+    )
+
+    assert result.summary["eligible_count"] == 60
+
+
 def test_bocha_news_marks_severe_risk_and_keeps_source_links() -> None:
     result = score_market_snapshot(
         _snapshot(),
