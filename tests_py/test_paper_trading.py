@@ -293,7 +293,7 @@ def test_aggressive_profile_raises_defensive_exposure() -> None:
     assert result["allocated_exposure"] > 0.30
 
 
-def test_configured_minimum_exposure_overrides_defensive_target() -> None:
+def test_configured_minimum_exposure_is_suspended_in_defensive_regime() -> None:
     frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
     params = {
         **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
@@ -311,9 +311,73 @@ def test_configured_minimum_exposure_overrides_defensive_target() -> None:
     )
 
     assert result["market_regime"] == "防守"
+    # 防守状态下最低仓位被挂起，避免市场转弱时被迫买入无信号标的。
+    assert result["minimum_exposure"] == 0.0
+    assert result["minimum_suspended_reason"]
+    assert result["requested_exposure"] == 0.35
+    assert result["allocated_exposure"] > 0.30
+
+
+def test_configured_minimum_exposure_applies_in_offensive_regime() -> None:
+    frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
+    params = {
+        **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        "minimum_exposure": 0.70,
+    }
+    result = _analyze(
+        pd.Timestamp("2025-12-31"),
+        frames,
+        FakeProvider().fetch_industries(SYMBOLS),
+        params,
+        {},
+        100_000,
+        "moving_average",
+        {"technical_breadth": {"composite": 0.90, "coverage": 0.95}},
+    )
+
+    assert result["market_regime"] == "进攻"
     assert result["minimum_exposure"] == 0.70
-    assert result["requested_exposure"] == 0.70
-    assert result["allocated_exposure"] > 0.65
+    assert result["minimum_suspended_reason"] is None
+    assert result["requested_exposure"] >= 0.70
+    assert result["allocated_exposure"] >= 0.70
+
+
+def test_etf_fallback_fills_gap_when_stock_pool_is_too_small() -> None:
+    from backend.paper_trading import ETF_FALLBACK_POOL
+
+    stock_symbols = SYMBOLS[:3]
+    frames = {
+        symbol: market_frame(index) for index, symbol in enumerate(stock_symbols)
+    }
+    for index, symbol in enumerate(ETF_FALLBACK_POOL):
+        frames[symbol] = market_frame(index)
+    params = {
+        **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        "minimum_exposure": 0.70,
+    }
+    result = _analyze(
+        pd.Timestamp("2025-12-31"),
+        frames,
+        FakeProvider().fetch_industries(stock_symbols),
+        params,
+        {},
+        100_000,
+        "moving_average",
+    )
+
+    # 只有3只个股（最多3×25%=75%）时，缺口由趋势成立的宽基ETF补足；
+    # 趋势不成立的ETF（如本数据中的510500）不会被买入，剩余缺口留现金。
+    assert result["allocated_exposure"] >= 0.80
+    assert result["etf_fallback_used"]
+    assert "159919.SZ" in result["target_weights"]
+    assert "159915.SZ" in result["target_weights"]
+    assert "510500.SH" not in result["target_weights"]
+    assert any(
+        symbol in result["target_weights"] for symbol in ETF_FALLBACK_POOL
+    )
+    assert any(
+        item["symbol"] in ETF_FALLBACK_POOL for item in result["plan"]
+    )
 
 
 def test_analysis_skips_symbols_whose_board_lot_exceeds_position_cap() -> None:

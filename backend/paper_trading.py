@@ -120,6 +120,19 @@ RISK_PROFILE_INITIAL_VERSION = {
     "aggressive": "v1.0-aggressive",
 }
 
+# 宽基ETF兜底池：个股优选不足时用市场beta补足最低仓位。
+# 均为一手成本远低于10万元资金规模的品种，且不需要科创板等额外权限。
+ETF_FALLBACK_POOL = [
+    "159919.SZ",  # 沪深300ETF
+    "510500.SH",  # 中证500ETF
+    "159915.SZ",  # 创业板ETF
+]
+ETF_NAMES = {
+    "159919.SZ": "沪深300ETF",
+    "510500.SH": "中证500ETF",
+    "159915.SZ": "创业板ETF",
+}
+
 
 @dataclass(frozen=True)
 class PaperCosts:
@@ -137,8 +150,12 @@ def _load_frames(
 ) -> tuple[dict[str, pd.DataFrame], list[dict[str, str]]]:
     frames: dict[str, pd.DataFrame] = {}
     errors: list[dict[str, str]] = []
-    for index, symbol in enumerate(symbols, start=1):
-        logger.info("Paper trading data %s/%s: %s", index, len(symbols), symbol)
+    # 宽基ETF兜底池随每次加载自动附加，保证个股选不满时兜底候选可用。
+    load_symbols = list(dict.fromkeys([*symbols, *ETF_FALLBACK_POOL]))
+    for index, symbol in enumerate(load_symbols, start=1):
+        logger.info(
+            "Paper trading data %s/%s: %s", index, len(load_symbols), symbol
+        )
         try:
             frame = provider.fetch_daily(symbol, start_date, end_date).frame
             frames[symbol] = frame.sort_values("trade_date").reset_index(drop=True)
@@ -273,7 +290,9 @@ def _calendar(frames: dict[str, pd.DataFrame]) -> list[pd.Timestamp]:
         for value in _date_values(frame):
             timestamp = pd.Timestamp(value)
             counts[timestamp] = counts.get(timestamp, 0) + 1
-    minimum = max(3, math.ceil(len(frames) * 0.5))
+    # 共同交易日门槛只按个股统计，宽基ETF兜底池的加入不应抬高门槛。
+    stock_count = sum(1 for symbol in frames if not is_etf(symbol))
+    minimum = max(3, math.ceil(stock_count * 0.5))
     return sorted(day for day, count in counts.items() if count >= minimum)
 
 
@@ -438,6 +457,8 @@ def _analyze(
 ) -> dict[str, Any]:
     feature_rows: list[dict[str, Any]] = []
     for symbol, frame in frames.items():
+        if is_etf(symbol):
+            continue
         feature = _feature_row(frame, trade_date, params)
         if feature is None:
             continue
@@ -454,6 +475,16 @@ def _analyze(
                 **feature,
             }
         )
+
+    # 宽基ETF只参与最低仓位兜底，不进入个股评分、板块与宽度统计。
+    etf_features: dict[str, dict[str, Any]] = {}
+    for symbol in ETF_FALLBACK_POOL:
+        frame = frames.get(symbol)
+        if frame is None:
+            continue
+        feature = _feature_row(frame, trade_date, params)
+        if feature is not None:
+            etf_features[symbol] = feature
 
     classified = sum(
         1
@@ -478,10 +509,12 @@ def _analyze(
             "features": {},
             "requested_exposure": 0.0,
             "minimum_exposure": float(params.get("minimum_exposure", 0.0)),
+            "minimum_suspended_reason": None,
             "allocated_exposure": 0.0,
             "unallocated_exposure": 0.0,
             "exposure_constraint": "no_usable_features",
             "unaffordable_symbols": [],
+            "etf_fallback_used": [],
         }
 
     table = pd.DataFrame(feature_rows).set_index("symbol")
@@ -559,10 +592,20 @@ def _analyze(
     else:
         market_regime = "防守"
         exposure = params["defensive_exposure"]
-    minimum_exposure = min(
+    configured_minimum = min(
         max(float(params.get("minimum_exposure", 0.0)), 0.0),
         0.95,
     )
+    if market_regime == "防守":
+        # 防守状态下不强制最低仓位：趋势宽度不足时强制买入会把资金
+        # 暴露在没有信号的标的上，负期望明显，保留防守仓位即可。
+        minimum_exposure = 0.0
+        minimum_suspended_reason = (
+            "防守状态不强制最低仓位，避免市场转弱时被迫买入"
+        )
+    else:
+        minimum_exposure = configured_minimum
+        minimum_suspended_reason = None
     exposure = max(float(exposure), minimum_exposure)
 
     sector_table = (
@@ -585,9 +628,25 @@ def _analyze(
     ]
     allowed_sectors = {item["name"] for item in top_sectors}
 
-    eligible = table[
+    strict_pool = table[
         table["eligible"] & table["sector"].isin(allowed_sectors)
     ].sort_values("score", ascending=False)
+    # 分层放宽：先严格池（信号+板块+分数）。仍凑不满最低仓位时，
+    # 依次放开板块限制、再降低分数门槛。趋势信号始终是硬门槛，
+    # 只放宽板块与分数这类"偏好/优选"条件，避免买入无信号的标的。
+    sector_relaxed_pool = table[
+        table["eligible"] & ~table["sector"].isin(allowed_sectors)
+    ].sort_values("score", ascending=False)
+    score_floor = params["minimum_score"] * float(
+        params.get("score_relax_factor", 0.60)
+    )
+    score_relaxed_pool = table[
+        strategy_eligible
+        & (table["average_amount"] >= params["minimum_amount"])
+        & (table["score"] >= score_floor)
+        & ~table["name"].str.upper().str.contains("ST", regex=False)
+    ].sort_values("score", ascending=False)
+
     selected: list[str] = []
     minimum_weights: dict[str, float] = {}
     unaffordable_symbols: list[str] = []
@@ -597,33 +656,47 @@ def _analyze(
         if position_sizing_equity is not None and position_sizing_equity > 0
         else float(equity)
     )
-    for symbol, row in eligible.iterrows():
-        sector = str(row["sector"])
-        if sector_counts.get(sector, 0) >= params["max_per_sector"]:
-            continue
-        symbol = str(symbol)
-        # A continuous target weight is meaningless if the account cannot buy
-        # even one A-share board lot.  Reserve enough weight for one lot with
-        # opening-gap headroom, otherwise skip the symbol and keep scanning the
-        # ranked list so its budget can be reassigned to an executable name.
-        minimum_weight = 0.0
-        if symbol not in positions and sizing_equity > 0:
-            minimum_weight = (
-                100
-                * float(row["raw_close"])
-                * float(params.get("board_lot_price_buffer", 1.10))
-                / sizing_equity
-            )
-        if minimum_weight > params["max_position_weight"] + 1e-12:
-            unaffordable_symbols.append(symbol)
-            continue
-        if sum(minimum_weights.values()) + minimum_weight > exposure + 1e-12:
-            unaffordable_symbols.append(symbol)
-            continue
-        selected.append(symbol)
-        minimum_weights[symbol] = minimum_weight
-        sector_counts[sector] = sector_counts.get(sector, 0) + 1
+
+    def _coverable_exposure() -> float:
+        return (
+            len(selected) * params["max_position_weight"]
+            + sum(minimum_weights.values())
+        )
+
+    for pool in (strict_pool, sector_relaxed_pool, score_relaxed_pool):
+        for symbol, row in pool.iterrows():
+            symbol = str(symbol)
+            if symbol in selected:
+                continue
+            sector = str(row["sector"])
+            if sector_counts.get(sector, 0) >= params["max_per_sector"]:
+                continue
+            # A continuous target weight is meaningless if the account cannot buy
+            # even one A-share board lot.  Reserve enough weight for one lot with
+            # opening-gap headroom, otherwise skip the symbol and keep scanning the
+            # ranked list so its budget can be reassigned to an executable name.
+            minimum_weight = 0.0
+            if symbol not in positions and sizing_equity > 0:
+                minimum_weight = (
+                    100
+                    * float(row["raw_close"])
+                    * float(params.get("board_lot_price_buffer", 1.10))
+                    / sizing_equity
+                )
+            if minimum_weight > params["max_position_weight"] + 1e-12:
+                unaffordable_symbols.append(symbol)
+                continue
+            if sum(minimum_weights.values()) + minimum_weight > exposure + 1e-12:
+                unaffordable_symbols.append(symbol)
+                continue
+            selected.append(symbol)
+            minimum_weights[symbol] = minimum_weight
+            sector_counts[sector] = sector_counts.get(sector, 0) + 1
+            if len(selected) >= params["max_positions"]:
+                break
         if len(selected) >= params["max_positions"]:
+            break
+        if _coverable_exposure() >= exposure - 1e-9:
             break
 
     target_weights: dict[str, float] = {}
@@ -639,10 +712,44 @@ def _analyze(
             minimum_weights,
         )
     allocated_exposure = float(sum(target_weights.values()))
+    etf_fallback_used: list[str] = []
+    if exposure > 0:
+        gap = max(float(exposure) - allocated_exposure, 0.0)
+        if gap > 1e-9:
+            # 个股优选不足时用宽基ETF补足缺口：只选自身趋势成立的ETF，
+            # 用市场beta承接仓位，而不是买入无信号的个股。组合总标的数
+            # 仍受 max_positions 约束，ETF不额外突破组合纪律。
+            etf_candidates = [
+                symbol
+                for symbol in ETF_FALLBACK_POOL
+                if symbol not in target_weights
+                and symbol in etf_features
+                and float(etf_features[symbol]["fast_ma"])
+                > float(etf_features[symbol]["slow_ma"])
+                and float(etf_features[symbol]["adj_close"])
+                > float(etf_features[symbol]["slow_ma"])
+            ]
+            for symbol in etf_candidates:
+                if len(target_weights) >= params["max_positions"]:
+                    break
+                per_etf = min(
+                    gap / len(etf_candidates),
+                    params["max_position_weight"],
+                )
+                if per_etf <= 1e-9:
+                    break
+                target_weights[symbol] = round(per_etf, 6)
+                allocated_exposure = float(sum(target_weights.values()))
+                gap = max(float(exposure) - allocated_exposure, 0.0)
+                etf_fallback_used.append(symbol)
+                if gap <= 1e-9:
+                    break
     unallocated_exposure = max(float(exposure) - allocated_exposure, 0.0)
     exposure_constraint = (
         "position_count_times_cap"
         if unallocated_exposure > 1e-8 and selected
+        else "etf_fallback_capacity"
+        if unallocated_exposure > 1e-8 and etf_fallback_used
         else "board_lot_affordability"
         if unallocated_exposure > 1e-8 and unaffordable_symbols
         else "no_eligible_symbols"
@@ -664,6 +771,8 @@ def _analyze(
         current_weight = current_weights.get(symbol, 0.0)
         target_weight = target_weights.get(symbol, 0.0)
         feature = table.loc[symbol] if symbol in table.index else None
+        if feature is None and symbol in etf_features:
+            feature = pd.Series(etf_features[symbol])
         position = positions.get(symbol)
         hard_stop = False
         stop_reason = ""
@@ -714,6 +823,11 @@ def _analyze(
             action = "BUY"
             if position:
                 reason = "趋势保持且当前仓位低于目标，模拟加仓"
+            elif symbol in etf_fallback_used:
+                reason = (
+                    f"宽基ETF兜底：个股优选不足，用市场beta补足最低仓位"
+                    f"（{STRATEGY_NAMES[strategy_id]}趋势成立）"
+                )
             else:
                 score = float(feature["score"]) if feature is not None else 0.0
                 reason = (
@@ -728,7 +842,12 @@ def _analyze(
         plan.append(
             {
                 "symbol": symbol,
-                "name": str(source.get("name") or industry.get("name") or symbol),
+                "name": str(
+                    source.get("name")
+                    or industry.get("name")
+                    or ETF_NAMES.get(symbol)
+                    or symbol
+                ),
                 "sector": str(
                     source.get("sector") or industry.get("sector_name") or "未分类"
                 ),
@@ -754,10 +873,12 @@ def _analyze(
         "features": table.to_dict(orient="index"),
         "requested_exposure": float(exposure),
         "minimum_exposure": minimum_exposure,
+        "minimum_suspended_reason": minimum_suspended_reason,
         "allocated_exposure": allocated_exposure,
         "unallocated_exposure": unallocated_exposure,
         "exposure_constraint": exposure_constraint,
         "unaffordable_symbols": unaffordable_symbols,
+        "etf_fallback_used": etf_fallback_used,
     }
 
 
@@ -909,7 +1030,7 @@ def _execute_pending(
                 outcome["constraint_reason"] = "board_lot_constraint"
                 outcomes.append(outcome)
                 continue
-            if limit_fields_present and not limit_check_available:
+            if not is_etf(symbol) and limit_fields_present and not limit_check_available:
                 outcome["constraint_reason"] = "price_limit_unavailable"
                 outcomes.append(outcome)
                 continue
@@ -958,7 +1079,7 @@ def _execute_pending(
                 outcomes.append(outcome)
                 continue
             planned_quantity = quantity
-            if limit_fields_present and not limit_check_available:
+            if not is_etf(symbol) and limit_fields_present and not limit_check_available:
                 outcome["constraint_reason"] = "price_limit_unavailable"
                 outcomes.append(outcome)
                 continue
@@ -1005,7 +1126,10 @@ def _execute_pending(
                 current["shares"] = total_shares
             else:
                 positions[symbol] = {
-                    "name": item.get("name") or industry.get("name") or symbol,
+                    "name": item.get("name")
+                    or industry.get("name")
+                    or ETF_NAMES.get(symbol)
+                    or symbol,
                     "sector": item.get("sector")
                     or industry.get("sector_name")
                     or "未分类",
@@ -1475,10 +1599,12 @@ def _process_dates(
             "selected_symbols": analysis["selected_symbols"],
             "requested_exposure": round(analysis["requested_exposure"], 6),
             "minimum_exposure": round(analysis["minimum_exposure"], 6),
+            "minimum_suspended_reason": analysis.get("minimum_suspended_reason"),
             "allocated_exposure": round(analysis["allocated_exposure"], 6),
             "unallocated_exposure": round(analysis["unallocated_exposure"], 6),
             "exposure_constraint": analysis["exposure_constraint"],
             "unaffordable_symbols": analysis.get("unaffordable_symbols", []),
+            "etf_fallback_used": analysis.get("etf_fallback_used", []),
             "strategy_version": account["current_version"],
         }
         store.add_snapshot(account["account_id"], snapshot)

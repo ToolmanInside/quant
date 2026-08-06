@@ -607,9 +607,10 @@ def build_markdown_report(
         if current_equity > 0
         else 0.0
     )
-    minimum_exposure = float(
-        configuration.get("minimum_invested_ratio", 0.0)
-    )
+    # 生效下限：防守状态下最低仓位被挂起，展示实际生效值并说明原因。
+    minimum_exposure = float(latest.get("minimum_exposure", 0.0))
+    minimum_suspended_reason = latest.get("minimum_suspended_reason")
+    configured_minimum = float(configuration.get("minimum_invested_ratio", 0.0))
     peak_return = float(account["peak_equity"]) / initial_cash - 1
     run = dashboard.get("run") or {}
     processed_days = int(run.get("processed_days", 0))
@@ -662,7 +663,7 @@ def build_markdown_report(
             "- 策略："
             f"**{configuration.get('strategy_name', configuration.get('strategy_id', '—'))}**；"
             f"风险档 **{RISK_PROFILE_NAMES.get(configuration.get('risk_profile', 'balanced'), configuration.get('risk_profile', 'balanced'))}**；"
-            f"最低仓位 **{minimum_exposure:.0%}**；"
+            f"最低仓位 **{configured_minimum:.0%}**；"
             f"频率 **{configuration.get('frequency', '1d')}**"
         ),
         "",
@@ -685,12 +686,26 @@ def build_markdown_report(
             f"约束后现金缓冲 {float(latest.get('unallocated_exposure', 0)):.1%}。"
         ),
         (
-            f"- 实际仓位 {actual_exposure:.1%}；配置下限 {minimum_exposure:.1%}。"
+            f"- 实际仓位 {actual_exposure:.1%}；"
+            + (
+                f"配置下限 {minimum_exposure:.1%}（防守状态不强制）。"
+                if minimum_suspended_reason
+                else f"配置下限 {minimum_exposure:.1%}。"
+            )
             + (
                 " ⚠️ 当前低于下限，详见执行约束并将在下一交易日继续补足。"
                 if actual_exposure + 1e-6 < minimum_exposure
                 else ""
             )
+        ),
+        *(
+            [
+                "- 宽基ETF兜底：个股优选不足，已用 "
+                + "、".join(str(item) for item in latest.get("etf_fallback_used") or [])
+                + " 承接市场beta补足仓位。"
+            ]
+            if latest.get("etf_fallback_used")
+            else []
         ),
         *(
             [
