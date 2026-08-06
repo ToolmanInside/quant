@@ -344,7 +344,6 @@ def test_configured_minimum_exposure_applies_in_offensive_regime() -> None:
 
 def test_etf_fallback_fills_gap_when_stock_pool_is_too_small() -> None:
     from backend.paper_trading import ETF_FALLBACK_POOL
-
     stock_symbols = SYMBOLS[:3]
     frames = {
         symbol: market_frame(index) for index, symbol in enumerate(stock_symbols)
@@ -378,6 +377,32 @@ def test_etf_fallback_fills_gap_when_stock_pool_is_too_small() -> None:
     assert any(
         item["symbol"] in ETF_FALLBACK_POOL for item in result["plan"]
     )
+
+
+def test_candidate_pool_etf_still_participates_in_stock_selection() -> None:
+    # 159611.SZ 这类主题ETF在候选池中时应保持原有个股化选股行为，
+    # 只有兜底池的宽基ETF(159919/510500/159915)才走独立兜底路径。
+    pool_symbols = [*SYMBOLS[:5], "159611.SZ"]
+    frames = {
+        symbol: market_frame(index) for index, symbol in enumerate(pool_symbols)
+    }
+    params = {
+        **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        "minimum_exposure": 0.70,
+    }
+    result = _analyze(
+        pd.Timestamp("2025-12-31"),
+        frames,
+        FakeProvider().fetch_industries(pool_symbols),
+        params,
+        {},
+        100_000,
+        "moving_average",
+        {"technical_breadth": {"composite": 0.90, "coverage": 0.95}},
+    )
+
+    assert "159611.SZ" in result["features"]
+    assert result["etf_fallback_used"] == []
 
 
 def test_analysis_skips_symbols_whose_board_lot_exceeds_position_cap() -> None:

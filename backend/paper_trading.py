@@ -457,7 +457,9 @@ def _analyze(
 ) -> dict[str, Any]:
     feature_rows: list[dict[str, Any]] = []
     for symbol, frame in frames.items():
-        if is_etf(symbol):
+        # 只有兜底池的宽基ETF不参与个股选股；候选池中的ETF
+        # （如159611.SZ等主题ETF）保持原有个股化选股行为。
+        if is_etf(symbol) and symbol in ETF_FALLBACK_POOL:
             continue
         feature = _feature_row(frame, trade_date, params)
         if feature is None:
