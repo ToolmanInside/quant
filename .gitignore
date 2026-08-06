@@ -19,6 +19,22 @@ backend/*/__pycache__
 scripts/__pycache__
 tests_py/__pycache__/
 
+# python build/cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist-packages/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.pytest_cache/
+
 # testing
 /coverage
 
