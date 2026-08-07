@@ -213,7 +213,7 @@ def test_qq_payload_uses_token_and_checks_success() -> None:
         assert request.url.path == "/v2/groups/GROUP_OPENID/messages"
         assert request.headers["Authorization"] == "QQBot TOKEN"
         requests.append(json.loads(request.content))
-        return httpx.Response(200, json={"code": 0, "message": "ok"})
+        return httpx.Response(200, json={"err_code": 0, "message": "ok"})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         send_qq_group_messages(
@@ -226,6 +226,36 @@ def test_qq_payload_uses_token_and_checks_success() -> None:
 
     assert token_requested
     assert requests == [{"msg_type": 0, "content": "日报正文"}]
+
+
+def test_qq_err_code_marks_message_as_failed_and_raises() -> None:
+    calls = {"message": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/app/getAppAccessToken"):
+            return httpx.Response(200, json={"access_token": "TOKEN"})
+        calls["message"] += 1
+        return httpx.Response(
+            200,
+            json={"err_code": 40034005, "message": "回复消息msg_id已过期"},
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        try:
+            send_qq_group_messages(
+                "GROUP_OPENID",
+                "APP_ID",
+                "APP_SECRET",
+                "日报正文",
+                client=client,
+                retry_count=1,
+            )
+            raise AssertionError("应当抛出推送失败异常")
+        except RuntimeError as exc:
+            assert "QQ群第 1/1 段推送失败" in str(exc)
+
+    # 初始1次 + 重试1次
+    assert calls["message"] == 2
 
 
 def test_unified_config_resolves_secrets_and_all_runtime_settings(

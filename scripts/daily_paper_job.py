@@ -1069,7 +1069,9 @@ def send_qq_group_messages(
                     )
                     response.raise_for_status()
                     result = response.json()
-                    if result.get("code") not in (None, 0):
+                    # 官方约定：失败响应体携带 err_code（成功为0/缺省），
+                    # 不要依据 message 文本判断成败。
+                    if result.get("err_code"):
                         raise RuntimeError(
                             f"QQ机器人拒绝消息：{result.get('message', result)}"
                         )
