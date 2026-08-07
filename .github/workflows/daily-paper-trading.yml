@@ -32,7 +32,7 @@ on:
         type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: daily-paper-trading
@@ -69,29 +69,40 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --requirement requirements.txt
 
-      - name: Restore paper account and market-data cache
+      # 行情数据缓存（丢失可重建，7 天过期无风险）
+      - name: Restore market-data cache
         uses: actions/cache/restore@v4
         with:
-          path: |
-            .quant-state
-            backend/data/cache
-          key: quant-paper-state-v1-${{ github.run_id }}
+          path: backend/data/cache
+          key: quant-market-cache-v1-${{ github.run_id }}
           restore-keys: |
-            quant-paper-state-v1-
+            quant-market-cache-v1-
+
+      # 账户状态已在 Git 中持久化（.quant-state/accounts/*.txt），
+      # checkout 即恢复，不再依赖 actions/cache。
 
       - name: Update data, analyze and push tomorrow's plan
         run: >-
           python scripts/daily_paper_job.py
           --config config/quant-config.json
 
-      - name: Save paper account and market-data cache
+      # 保存行情数据缓存
+      - name: Save market-data cache
         if: ${{ env.PAPER_JOB_MODE == 'daily-close' }}
         uses: actions/cache/save@v4
         with:
-          path: |
-            .quant-state
-            backend/data/cache
-          key: quant-paper-state-v1-${{ github.run_id }}
+          path: backend/data/cache
+          key: quant-market-cache-v1-${{ github.run_id }}
+
+      # 将账户状态提交到 Git（日终任务后）
+      - name: Commit account state
+        if: ${{ env.PAPER_JOB_MODE == 'daily-close' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .quant-state/accounts/*.txt
+          git diff --cached --quiet || git commit -m "chore: update paper account state [skip ci]"
+          git push
 
       - name: Upload daily report and account text backup
         if: ${{ always() && hashFiles('outputs/*.md') != '' }}

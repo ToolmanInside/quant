@@ -1308,83 +1308,151 @@ def run_daily_job(
                 config.account_id,
                 as_of_date,
             )
-            research_date = (
-                date.fromisoformat(str(market_research_summary["trade_date"]))
-                if market_research_summary
-                and market_research_summary.get("mode") == "full_market"
-                else as_of_date
-            )
-            transition_end = research_date - timedelta(days=1)
-            use_fixed_history_transition = (
-                config.universe_mode == "full_market"
-                and transition_end >= config.simulation_start_date
-            )
-            replay_symbols = (
-                config.symbols
-                if use_fixed_history_transition
-                else effective_config.symbols
-            )
-            replay_end = (
-                transition_end
-                if use_fixed_history_transition
-                else as_of_date
-            )
-            result = replay_paper_simulation(
-                PaperSimulationRequest(
-                    account_id=config.account_id,
-                    strategy_id=config.strategy_id,
-                    universe_mode=config.universe_mode,
-                    symbols=replay_symbols,
-                    backtest_start_date=config.backtest_start_date,
-                    backtest_end_date=config.backtest_end_date,
-                    simulation_start_date=config.simulation_start_date,
-                    simulation_end_date=replay_end,
-                    initial_cash=config.initial_cash,
-                    risk_profile=config.risk_profile,
-                    minimum_invested_ratio=config.minimum_invested_ratio,
-                ),
-                provider,
-                store,
-            )
-            if "account" not in result:
-                return result
-            if use_fixed_history_transition:
-                assert market_research_summary is not None
-                transition_account = store.account(config.account_id) or {}
-                transition_required = [
-                    item["symbol"] for item in store.positions(config.account_id)
-                ] + [
-                    item["symbol"]
-                    for item in transition_account.get("pending_plan", [])
-                ]
-                active_symbols = list(
-                    dict.fromkeys(active_symbols + transition_required)
-                )
-                effective_config = replace(config, symbols=active_symbols)
-                market_research_summary["active_symbols"] = active_symbols
-                market_research_summary["required_position_symbols"] = list(
-                    dict.fromkeys(transition_required)
-                )
-                market_research_summary["warnings"].append(
-                    "全市场模式首次启用：历史模拟沿用配置中的固定池，"
-                    f"自 {research_date} 起才按每日全市场截面动态选股，"
-                    "避免用今天候选回看过去造成事后选股偏差。"
-                )
-                _persist_research_context(
-                    store,
-                    effective_config,
-                    active_symbols,
-                    market_research_summary,
-                )
-                result = advance_paper_simulation(
-                    PaperAdvanceRequest(
+
+            # 全市场模式下的重建：
+            #   1. replay 只回放模拟首日（固定池建立回测版本+首日信号）
+            #   2. 后续每个模拟交易日逐日全市场截面扫描，和日常运行一致
+            if config.universe_mode == "full_market":
+                # 第 1 步：用固定池 replay 到模拟首日
+                replay_first_day = config.simulation_start_date
+                result = replay_paper_simulation(
+                    PaperSimulationRequest(
                         account_id=config.account_id,
-                        symbols=effective_config.symbols,
-                        as_of_date=as_of_date,
+                        strategy_id=config.strategy_id,
+                        universe_mode=config.universe_mode,
+                        symbols=config.symbols,
+                        backtest_start_date=config.backtest_start_date,
+                        backtest_end_date=config.backtest_end_date,
+                        simulation_start_date=config.simulation_start_date,
+                        simulation_end_date=replay_first_day,
+                        initial_cash=config.initial_cash,
+                        risk_profile=config.risk_profile,
+                        minimum_invested_ratio=config.minimum_invested_ratio,
                     ),
                     provider,
                     store,
                 )
+                if "account" not in result:
+                    return result
+
+                # 第 2 步：获取首日之后到今天的交易日列表
+                rebuild_account = store.account(config.account_id) or {}
+                last_date_text = rebuild_account.get("last_date")
+                if last_date_text:
+                    open_dates = provider.fetch_open_dates(
+                        date.fromisoformat(last_date_text) + timedelta(days=1),
+                        as_of_date,
+                    )
+                else:
+                    open_dates = []
+
+                # 第 3 步：逐日全市场截面扫描+advance
+                if open_dates:
+                    total_processed = 0
+                    researched_days = 0
+                    combined_errors: list[dict[str, str]] = []
+                    for index, replay_date in enumerate(open_dates):
+                        active_symbols, market_research_summary = (
+                            _active_market_universe(
+                                provider,
+                                store,
+                                config,
+                                replay_date,
+                                universe_config,
+                                news_config,
+                                bocha_api_key,
+                                include_news=index == len(open_dates) - 1,
+                            )
+                        )
+                        if (
+                            market_research_summary
+                            and market_research_summary.get("mode") == "full_market"
+                            and market_research_summary.get("trade_date")
+                            != replay_date.isoformat()
+                        ):
+                            market_research_summary["warnings"].append(
+                                f"{replay_date} 收盘数据尚未完整发布，"
+                                "逐日重建在此停止。"
+                            )
+                            break
+                        effective_config = replace(config, symbols=active_symbols)
+                        _persist_research_context(
+                            store,
+                            effective_config,
+                            active_symbols,
+                            market_research_summary,
+                        )
+                        LOGGER.info(
+                            "重建 %s 全市场截面；详细候选池 %s 只（%s/%s）",
+                            replay_date,
+                            len(active_symbols),
+                            index + 1,
+                            len(open_dates),
+                        )
+                        result = advance_paper_simulation(
+                            PaperAdvanceRequest(
+                                account_id=config.account_id,
+                                symbols=effective_config.symbols,
+                                as_of_date=replay_date,
+                            ),
+                            provider,
+                            store,
+                        )
+                        metadata = result.get("run") or {}
+                        total_processed += int(metadata.get("processed_days", 0))
+                        researched_days += 1
+                        combined_errors.extend(metadata.get("data_errors") or [])
+                    result["run"] = {
+                        **(result.get("run") or {}),
+                        "processed_days": total_processed,
+                        "data_errors": combined_errors,
+                        "point_in_time_research_days": researched_days,
+                        "message": (
+                            f"重建完成：回放模拟首日 + 逐日全市场截面扫描 "
+                            f"{researched_days} 天，共处理 {total_processed} 个交易日。"
+                        ),
+                    }
+                else:
+                    # 只有模拟首日，无后续交易日
+                    active_symbols, market_research_summary = (
+                        _active_market_universe(
+                            provider,
+                            store,
+                            config,
+                            as_of_date,
+                            universe_config,
+                            news_config,
+                            bocha_api_key,
+                        )
+                    )
+                    effective_config = replace(config, symbols=active_symbols)
+                    _persist_research_context(
+                        store,
+                        effective_config,
+                        active_symbols,
+                        market_research_summary,
+                    )
+            else:
+                # 固定池模式：直接 replay 到 as_of_date
+                result = replay_paper_simulation(
+                    PaperSimulationRequest(
+                        account_id=config.account_id,
+                        strategy_id=config.strategy_id,
+                        universe_mode=config.universe_mode,
+                        symbols=effective_config.symbols,
+                        backtest_start_date=config.backtest_start_date,
+                        backtest_end_date=config.backtest_end_date,
+                        simulation_start_date=config.simulation_start_date,
+                        simulation_end_date=as_of_date,
+                        initial_cash=config.initial_cash,
+                        risk_profile=config.risk_profile,
+                        minimum_invested_ratio=config.minimum_invested_ratio,
+                    ),
+                    provider,
+                    store,
+                )
+                if "account" not in result:
+                    return result
         else:
             if configuration_changed or state_upgrade_required:
                 raise ValueError(
