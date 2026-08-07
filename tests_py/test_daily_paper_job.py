@@ -279,8 +279,9 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.news_research.enabled
     assert config.wechat_webhook_url.endswith("key=test")
     assert config.notification_provider == "wechat"
-    assert config.qq_app_id == "test-qq-app-id"
-    assert config.qq_group_openid == "test-qq-group-openid"
+    # provider=wechat 时 QQ 配置不解析（留空）
+    assert config.qq_app_id == ""
+    assert config.qq_group_openid == ""
     assert config.paper_account.frequency == "1d"
     assert config.paper_account.strategy_id == "moving_average"
     assert config.paper_account.risk_profile == "aggressive"
