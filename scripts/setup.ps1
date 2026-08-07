@@ -1,12 +1,13 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$nodeDirectory = "C:\Program Files\nodejs"
-$npmPath = Join-Path $nodeDirectory "npm.cmd"
 $venvPython = Join-Path $projectRoot ".venv\Scripts\python.exe"
 
-if (-not (Test-Path -LiteralPath $npmPath)) {
-    throw "System Node.js was not found at: $npmPath"
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw "System Node.js was not found on PATH. Install Node.js >= 22 first."
+}
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    throw "System npm was not found on PATH. Install Node.js >= 22 first."
 }
 
 $systemPython = Get-Command python -All -ErrorAction SilentlyContinue |
@@ -17,11 +18,10 @@ if (-not $systemPython) {
     throw "A usable system Python installation was not found on PATH."
 }
 
-$env:Path = "$nodeDirectory;$env:Path"
 $env:npm_config_cache = Join-Path $projectRoot ".npm-cache"
 $env:PIP_CACHE_DIR = Join-Path $projectRoot ".pip-cache"
 
-& $npmPath install --ignore-scripts --no-audit --no-fund
+npm install --ignore-scripts --no-audit --no-fund
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
     & $systemPython.Source -m venv (Join-Path $projectRoot ".venv")
@@ -32,7 +32,12 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 $envFile = Join-Path $projectRoot ".env"
 $exampleEnvFile = Join-Path $projectRoot ".env.example"
 if (-not (Test-Path -LiteralPath $envFile)) {
-    Copy-Item -LiteralPath $exampleEnvFile -Destination $envFile
+    if (Test-Path -LiteralPath $exampleEnvFile) {
+        Copy-Item -LiteralPath $exampleEnvFile -Destination $envFile
+        Write-Host "Created .env from .env.example."
+    } else {
+        Write-Warning ".env.example not found; create .env manually and add TUSHARE_TOKEN."
+    }
 }
 
 Write-Host "Quant Lab setup completed."

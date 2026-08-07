@@ -8,8 +8,8 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     throw "Python environment is missing. Run scripts\setup.ps1 first."
 }
 
-if (-not (Test-Path -LiteralPath "C:\Program Files\nodejs\node.exe")) {
-    throw "System Node.js was not found at C:\Program Files\nodejs."
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw "System Node.js was not found on PATH. Install Node.js >= 22 or set NODE_BIN."
 }
 
 Set-Location -LiteralPath $projectRoot
