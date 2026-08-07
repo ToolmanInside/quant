@@ -13,7 +13,7 @@ from scripts.daily_paper_job import (
     build_position_report,
     load_unified_config,
     run_daily_job,
-    send_qq_group_messages,
+    send_feishu_markdown,
     send_wechat_markdown,
 )
 
@@ -169,90 +169,86 @@ def test_wechat_long_report_is_split_without_omitting_tail() -> None:
     assert all(len(message.encode("utf-8")) < 3900 for message in captured)
 
 
-def test_qq_markdown_is_downgraded_to_plain_text() -> None:
-    markdown = (
-        "### 账户概览\n"
-        "> 信号日：**2026-08-06**\n"
-        "- 当前权益：**¥99,904.96**\n"
-        "- 新闻：[中煤能源公告](https://example.com/a)（搜狐证券）\n"
-    )
-    plain = daily_job._markdown_to_plain_text(markdown)
-
-    assert "账户概览" in plain
-    assert "###" not in plain
-    assert "**" not in plain
-    assert ">" not in plain
-    assert "信号日：2026-08-06" in plain
-    assert "中煤能源公告 (https://example.com/a)（搜狐证券）" in plain
-
-
-def test_qq_long_report_is_split_without_omitting_tail() -> None:
-    content = "\n\n".join(
-        f"#### 段落 {index}\n" + "理由内容" * 200 for index in range(12)
-    )
-    chunks = daily_job._split_qq_messages(content)
-
-    assert len(chunks) > 1
-    assert any("段落 11" in chunk for chunk in chunks)
-    assert all(len(chunk) <= daily_job.QQ_TEXT_CHUNK_LIMIT for chunk in chunks)
-
-
-def test_qq_payload_uses_token_and_checks_success() -> None:
-    requests: list[dict] = []
-    token_requested = False
+def test_feishu_payload_uses_interactive_card_with_lark_md() -> None:
+    captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal token_requested
-        if request.url.path.endswith("/app/getAppAccessToken"):
-            token_requested = True
-            assert json.loads(request.content) == {
-                "appId": "APP_ID",
-                "clientSecret": "APP_SECRET",
-            }
-            return httpx.Response(200, json={"access_token": "TOKEN", "expires_in": 7200})
-        assert request.url.path == "/v2/groups/GROUP_OPENID/messages"
-        assert request.headers["Authorization"] == "QQBot TOKEN"
-        requests.append(json.loads(request.content))
-        return httpx.Response(200, json={"err_code": 0, "message": "ok"})
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={"StatusCode": 0, "StatusMessage": "success"})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        send_qq_group_messages(
-            "GROUP_OPENID",
-            "APP_ID",
-            "APP_SECRET",
+        send_feishu_markdown(
+            "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
             "日报正文",
             client=client,
         )
 
-    assert token_requested
-    assert requests == [{"msg_type": 0, "content": "日报正文"}]
+    assert captured["msg_type"] == "interactive"
+    card = captured["card"]
+    assert card["elements"][0]["text"]["tag"] == "lark_md"
+    assert card["elements"][0]["text"]["content"] == "日报正文"
 
 
-def test_qq_err_code_marks_message_as_failed_and_raises() -> None:
+def test_feishu_sign_matches_official_hmac_sha256_scheme() -> None:
+    # 飞书官方示例：timestamp=1539248422, secret="test secret"
+    sign = daily_job._feishu_sign("1539248422", "test secret")
+    import base64
+    import hashlib
+    import hmac
+
+    expected = base64.b64encode(
+        hmac.new(
+            b"1539248422\ntest secret",
+            digestmod=hashlib.sha256,
+        ).digest()
+    ).decode("utf-8")
+    assert sign == expected
+
+
+def test_feishu_keyword_and_secret_are_included() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={"StatusCode": 0, "StatusMessage": "success"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        send_feishu_markdown(
+            "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
+            "日报正文",
+            secret="s3cret",
+            keyword="股票日报",
+            client=client,
+        )
+
+    assert captured["timestamp"]
+    assert captured["sign"]
+    assert captured["card"]["elements"][0]["text"]["content"].startswith(
+        "股票日报\n"
+    )
+
+
+def test_feishu_error_code_marks_message_as_failed_and_raises() -> None:
     calls = {"message": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/app/getAppAccessToken"):
-            return httpx.Response(200, json={"access_token": "TOKEN"})
         calls["message"] += 1
         return httpx.Response(
             200,
-            json={"err_code": 40034005, "message": "回复消息msg_id已过期"},
+            json={"code": 19024, "msg": "sign match fail"},
         )
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         try:
-            send_qq_group_messages(
-                "GROUP_OPENID",
-                "APP_ID",
-                "APP_SECRET",
+            send_feishu_markdown(
+                "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
                 "日报正文",
                 client=client,
                 retry_count=1,
             )
             raise AssertionError("应当抛出推送失败异常")
         except RuntimeError as exc:
-            assert "QQ群第 1/1 段推送失败" in str(exc)
+            assert "飞书第 1/1 段推送失败" in str(exc)
 
     # 初始1次 + 重试1次
     assert calls["message"] == 2
@@ -267,9 +263,12 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
         "WECHAT_WEBHOOK_URL",
         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
     )
-    monkeypatch.setenv("QQ_APP_ID", "test-qq-app-id")
-    monkeypatch.setenv("QQ_APP_SECRET", "test-qq-app-secret")
-    monkeypatch.setenv("QQ_GROUP_OPENID", "test-qq-group-openid")
+    monkeypatch.setenv(
+        "FEISHU_WEBHOOK_URL",
+        "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
+    )
+    monkeypatch.setenv("FEISHU_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setenv("FEISHU_WEBHOOK_KEYWORD", "股票日报")
 
     config = load_unified_config(Path("config/quant-config.json"))
 
@@ -278,10 +277,10 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.market_universe.mode == "full_market"
     assert config.news_research.enabled
     assert config.wechat_webhook_url.endswith("key=test")
-    assert config.notification_provider == "wechat"
-    # provider=wechat 时 QQ 配置不解析（留空）
-    assert config.qq_app_id == ""
-    assert config.qq_group_openid == ""
+    assert config.notification_provider == "feishu"
+    assert config.feishu_webhook_url.endswith("/hook/test-hook")
+    assert config.feishu_webhook_secret == "test-secret"
+    assert config.feishu_webhook_keyword == "股票日报"
     assert config.paper_account.frequency == "1d"
     assert config.paper_account.strategy_id == "moving_average"
     assert config.paper_account.risk_profile == "aggressive"
@@ -314,9 +313,12 @@ def test_unified_config_normalizes_symbols(tmp_path, monkeypatch) -> None:
         "WECHAT_WEBHOOK_URL",
         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
     )
-    monkeypatch.setenv("QQ_APP_ID", "test-qq-app-id")
-    monkeypatch.setenv("QQ_APP_SECRET", "test-qq-app-secret")
-    monkeypatch.setenv("QQ_GROUP_OPENID", "test-qq-group-openid")
+    monkeypatch.setenv(
+        "FEISHU_WEBHOOK_URL",
+        "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
+    )
+    monkeypatch.setenv("FEISHU_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setenv("FEISHU_WEBHOOK_KEYWORD", "股票日报")
     payload = json.loads(Path("config/quant-config.json").read_text(encoding="utf-8"))
     payload = deepcopy(payload)
     payload["paper_account"]["symbols"] = [

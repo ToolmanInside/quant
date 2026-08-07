@@ -70,12 +70,12 @@
     "report_path": "outputs/daily-paper-report.md"
   },
   "notification": {
-    "provider": "wechat",
+    "provider": "feishu",
     "wechat_enabled": true,
     "wechat_webhook_url": "${WECHAT_WEBHOOK_URL}",
-    "qq_app_id": "${QQ_APP_ID}",
-    "qq_app_secret": "${QQ_APP_SECRET}",
-    "qq_group_openid": "${QQ_GROUP_OPENID}",
+    "feishu_webhook_url": "${FEISHU_WEBHOOK_URL}",
+    "feishu_webhook_secret": "${FEISHU_WEBHOOK_SECRET}",
+    "feishu_webhook_keyword": "${FEISHU_WEBHOOK_KEYWORD}",
     "timeout_seconds": 20,
     "retry_count": 2
   },

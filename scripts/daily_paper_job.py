@@ -92,9 +92,9 @@ class UnifiedConfig:
     wechat_enabled: bool
     wechat_webhook_url: str
     notification_provider: str
-    qq_app_id: str
-    qq_app_secret: str
-    qq_group_openid: str
+    feishu_webhook_url: str
+    feishu_webhook_secret: str
+    feishu_webhook_keyword: str
     notification_timeout: int
     notification_retries: int
     report_title: str
@@ -271,36 +271,36 @@ def load_unified_config(path: Path) -> UnifiedConfig:
     notification_provider = str(
         notification.get("provider", "wechat")
     ).strip().lower()
-    if notification_provider not in ("wechat", "qq"):
+    if notification_provider not in ("wechat", "feishu"):
         raise ValueError(
-            "notification.provider 只能是 wechat 或 qq"
+            "notification.provider 只能是 wechat 或 feishu"
         )
-    qq_enabled = notification_provider == "qq"
-    qq_app_id = (
+    feishu_enabled = notification_provider == "feishu"
+    feishu_webhook_url = (
         _resolve_environment_placeholder(
-            notification.get("qq_app_id", ""),
-            "notification.qq_app_id",
-            required=qq_enabled,
+            notification.get("feishu_webhook_url", ""),
+            "notification.feishu_webhook_url",
+            required=feishu_enabled,
         )
-        if qq_enabled
+        if feishu_enabled
         else ""
     )
-    qq_app_secret = (
+    feishu_webhook_secret = (
         _resolve_environment_placeholder(
-            notification.get("qq_app_secret", ""),
-            "notification.qq_app_secret",
-            required=qq_enabled,
+            notification.get("feishu_webhook_secret", ""),
+            "notification.feishu_webhook_secret",
+            required=False,
         )
-        if qq_enabled
+        if feishu_enabled
         else ""
     )
-    qq_group_openid = (
+    feishu_webhook_keyword = (
         _resolve_environment_placeholder(
-            notification.get("qq_group_openid", ""),
-            "notification.qq_group_openid",
-            required=qq_enabled,
+            notification.get("feishu_webhook_keyword", ""),
+            "notification.feishu_webhook_keyword",
+            required=False,
         )
-        if qq_enabled
+        if feishu_enabled
         else ""
     )
     return UnifiedConfig(
@@ -358,9 +358,9 @@ def load_unified_config(path: Path) -> UnifiedConfig:
         wechat_enabled=wechat_enabled,
         wechat_webhook_url=webhook,
         notification_provider=notification_provider,
-        qq_app_id=qq_app_id,
-        qq_app_secret=qq_app_secret,
-        qq_group_openid=qq_group_openid,
+        feishu_webhook_url=feishu_webhook_url,
+        feishu_webhook_secret=feishu_webhook_secret,
+        feishu_webhook_keyword=feishu_webhook_keyword,
         notification_timeout=max(
             1,
             int(notification.get("timeout_seconds", 20)),
@@ -956,124 +956,100 @@ def send_wechat_markdown(
             active_client.close()
 
 
-QQ_TOKEN_URL = "https://api.bot.qq.com/app/getAppAccessToken"
-QQ_MESSAGE_URL = "https://api.sgroup.qq.com/v2/groups/{group_openid}/messages"
-# QQ官方机器人纯文本消息单条长度上限约3000字符，保守分段避免超限。
-QQ_TEXT_CHUNK_LIMIT = 2500
+FEISHU_WEBHOOK_URL_PREFIX = "https://open.feishu.cn/open-apis/bot/v2/hook/"
+# 飞书interactive卡片（lark_md）单条消息体上限约30KB，保守按字节分段。
+FEISHU_CARD_CHUNK_LIMIT = 12_000
 
 
-def _markdown_to_plain_text(content: str) -> str:
-    """把日报markdown降级为QQ可展示的纯文本（QQ群消息不渲染markdown）。"""
-    lines: list[str] = []
-    for raw_line in content.splitlines():
-        line = raw_line.rstrip()
-        if not line.strip():
-            lines.append("")
-            continue
-        stripped = line.lstrip()
-        # 去掉标题符号
-        if stripped.startswith("###") or stripped.startswith("##") or stripped.startswith("#"):
-            line = stripped.lstrip("#").strip()
-        # 去掉引用符号
-        elif stripped.startswith(">"):
-            line = stripped.lstrip(">").strip()
-        # 去掉加粗与行内代码符号
-        line = line.replace("**", "").replace("`", "")
-        # 链接 [文字](url) -> 文字 (url)
-        line = re.sub(r"\[([^\]]*)\]\(([^)]+)\)", r"\1 (\2)", line)
-        # 去掉行尾的md列表符号保留内容
-        if line.startswith("- ") or line.startswith("* "):
-            line = line[2:]
-        lines.append(line)
-    return "\n".join(lines)
+def _feishu_sign(timestamp: str, secret: str) -> str:
+    """飞书自定义机器人签名校验：HMAC-SHA256(timestamp\nsecret) 后 base64。"""
+    import base64
+    import hashlib
+    import hmac
+
+    string_to_sign = f"{timestamp}\n{secret}"
+    digest = hmac.new(
+        string_to_sign.encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).digest()
+    return base64.b64encode(digest).decode("utf-8")
 
 
-def _split_qq_messages(
+def _split_feishu_cards(
     content: str,
-    limit: int = QQ_TEXT_CHUNK_LIMIT,
+    limit: int = FEISHU_CARD_CHUNK_LIMIT,
 ) -> list[str]:
-    """按字符数分段，避免QQ文本消息超限；段落之间用空行分隔。"""
-    plain = _markdown_to_plain_text(content)
-    blocks = re.split(r"\n\s*\n", plain)
+    """按字节分段，避免lark_md内容超限发送失败。"""
     chunks: list[str] = []
     current = ""
-    for block in blocks:
-        candidate = f"{current}\n\n{block}".strip() if current else block.strip()
-        if len(candidate) > limit and current:
+    for line in content.splitlines(keepends=True):
+        if len((current + line).encode("utf-8")) > limit and current:
             chunks.append(current)
-            current = block.strip()
-        elif len(candidate) > limit:
-            # 单块超长：硬切
-            while len(block) > limit:
-                chunks.append(block[:limit])
-                block = block[limit:]
-            current = block
+            current = line
         else:
-            current = candidate
+            current += line
     if current:
         chunks.append(current)
     return chunks or [""]
 
 
-def _qq_access_token(
-    app_id: str,
-    app_secret: str,
-    client: httpx.Client,
-) -> str:
-    response = client.post(
-        QQ_TOKEN_URL,
-        json={"appId": app_id, "clientSecret": app_secret},
-    )
-    response.raise_for_status()
-    payload = response.json()
-    token = str(payload.get("access_token") or "")
-    if not token:
-        raise RuntimeError(
-            f"QQ机器人获取访问凭证失败：{payload.get('code', '')} "
-            f"{payload.get('message', payload)}"
-        )
-    return token
-
-
-def send_qq_group_messages(
-    group_openid: str,
-    app_id: str,
-    app_secret: str,
+def send_feishu_markdown(
+    webhook_url: str,
     content: str,
     *,
+    secret: str = "",
+    keyword: str = "",
     client: httpx.Client | None = None,
     timeout_seconds: int = 20,
     retry_count: int = 2,
 ) -> None:
-    """向QQ群推送日报（纯文本，自动分段）。"""
-    if not group_openid or not app_id or not app_secret:
-        raise ValueError("QQ推送缺少 group_openid / app_id / app_secret 配置")
+    """向飞书群推送日报（interactive卡片 + lark_md渲染markdown）。
+
+    支持机器人安全设置：关键词（每条消息前置关键词）与签名校验（timestamp+sign）。
+    """
+    import time
+
+    if not webhook_url.startswith(FEISHU_WEBHOOK_URL_PREFIX):
+        raise ValueError("FEISHU_WEBHOOK_URL 不是有效的飞书自定义机器人 Webhook")
+    messages = _split_feishu_cards(content)
     owns_client = client is None
     active_client = client or httpx.Client(timeout=timeout_seconds)
     try:
-        token = _qq_access_token(app_id, app_secret, active_client)
-        headers = {
-            "Authorization": f"QQBot {token}",
-            "Content-Type": "application/json",
-        }
-        messages = _split_qq_messages(content)
-        for message_index, message in enumerate(messages, start=1):
-            payload = {"msg_type": 0, "content": message}
+        for message_index, chunk in enumerate(messages, start=1):
+            body = chunk if not keyword else f"{keyword}\n{chunk}"
+            payload: dict[str, Any] = {
+                "msg_type": "interactive",
+                "card": {
+                    "config": {"wide_screen_mode": True},
+                    "header": {
+                        "title": {
+                            "tag": "plain_text",
+                            "content": "Quant Lab 模拟盘报告",
+                        },
+                    },
+                    "elements": [
+                        {
+                            "tag": "div",
+                            "text": {"tag": "lark_md", "content": body},
+                        }
+                    ],
+                },
+            }
+            if secret:
+                timestamp = str(int(time.time()))
+                payload["timestamp"] = timestamp
+                payload["sign"] = _feishu_sign(timestamp, secret)
             last_error_message = ""
             for attempt in range(retry_count + 1):
                 try:
-                    response = active_client.post(
-                        QQ_MESSAGE_URL.format(group_openid=group_openid),
-                        headers=headers,
-                        json=payload,
-                    )
+                    response = active_client.post(webhook_url, json=payload)
                     response.raise_for_status()
                     result = response.json()
-                    # 官方约定：失败响应体携带 err_code（成功为0/缺省），
-                    # 不要依据 message 文本判断成败。
-                    if result.get("err_code"):
+                    code = result.get("code", result.get("StatusCode", 0))
+                    if code not in (None, 0):
                         raise RuntimeError(
-                            f"QQ机器人拒绝消息：{result.get('message', result)}"
+                            "飞书机器人拒绝消息："
+                            f"{result.get('msg') or result.get('StatusMessage') or result}"
                         )
                     last_error_message = ""
                     break
@@ -1082,8 +1058,8 @@ def send_qq_group_messages(
                     try:
                         body = exc.response.json()
                         detail = (
-                            f" err_code={body.get('err_code')} "
-                            f"{body.get('message', '')}"
+                            f" code={body.get('code')} "
+                            f"{body.get('msg', '')}"
                         )
                     except Exception:
                         detail = f" {exc.response.text[:200]}"
@@ -1095,7 +1071,7 @@ def send_qq_group_messages(
                 except (RuntimeError, ValueError) as exc:
                     last_error_message = str(exc)
                 LOGGER.warning(
-                    "QQ群第 %s/%s 段推送第 %s/%s 次失败：%s",
+                    "飞书第 %s/%s 段推送第 %s/%s 次失败：%s",
                     message_index,
                     len(messages),
                     attempt + 1,
@@ -1104,14 +1080,12 @@ def send_qq_group_messages(
                 )
             if last_error_message:
                 raise RuntimeError(
-                    f"QQ群第 {message_index}/{len(messages)} 段推送失败，"
+                    f"飞书第 {message_index}/{len(messages)} 段推送失败，"
                     f"已重试 {retry_count} 次：{last_error_message}"
                 )
     finally:
         if owns_client:
             active_client.close()
-
-
 def _configuration_changed(account: dict[str, Any], config: JobConfig) -> bool:
     stored = account.get("configuration") or {}
     return (
@@ -1647,27 +1621,22 @@ def main() -> int:
 
         if args.skip_wechat or not unified.wechat_enabled:
             LOGGER.warning("已跳过消息推送")
-        elif unified.notification_provider == "qq":
-            if (
-                not unified.qq_group_openid
-                or not unified.qq_app_id
-                or not unified.qq_app_secret
-            ):
+        elif unified.notification_provider == "feishu":
+            if not unified.feishu_webhook_url:
                 raise ValueError(
-                    "QQ推送已启用，但 qq_group_openid / qq_app_id / "
-                    "qq_app_secret 为空；请填写配置文件或添加 "
-                    "QQ_GROUP_OPENID / QQ_APP_ID / QQ_APP_SECRET Secret"
+                    "飞书推送已启用，但 feishu_webhook_url 为空；"
+                    "请填写配置文件或添加 FEISHU_WEBHOOK_URL Secret"
                 )
-            send_qq_group_messages(
-                unified.qq_group_openid,
-                unified.qq_app_id,
-                unified.qq_app_secret,
+            send_feishu_markdown(
+                unified.feishu_webhook_url,
                 report,
+                secret=unified.feishu_webhook_secret,
+                keyword=unified.feishu_webhook_keyword,
                 timeout_seconds=unified.notification_timeout,
                 retry_count=unified.notification_retries,
             )
             LOGGER.info(
-                "QQ群%s推送成功",
+                "飞书%s推送成功",
                 (
                     unified.midday_report_title
                     if args.mode == "noon-position"
