@@ -70,7 +70,7 @@
     "report_path": "outputs/daily-paper-report.md"
   },
   "notification": {
-    "provider": "qq",
+    "provider": "wechat",
     "wechat_enabled": true,
     "wechat_webhook_url": "${WECHAT_WEBHOOK_URL}",
     "qq_app_id": "${QQ_APP_ID}",

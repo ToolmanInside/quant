@@ -278,7 +278,7 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.market_universe.mode == "full_market"
     assert config.news_research.enabled
     assert config.wechat_webhook_url.endswith("key=test")
-    assert config.notification_provider == "qq"
+    assert config.notification_provider == "wechat"
     assert config.qq_app_id == "test-qq-app-id"
     assert config.qq_group_openid == "test-qq-group-openid"
     assert config.paper_account.frequency == "1d"
