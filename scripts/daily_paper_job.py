@@ -1078,7 +1078,18 @@ def send_qq_group_messages(
                     last_error_message = ""
                     break
                 except httpx.HTTPStatusError as exc:
-                    last_error_message = f"HTTP {exc.response.status_code}"
+                    detail = ""
+                    try:
+                        body = exc.response.json()
+                        detail = (
+                            f" err_code={body.get('err_code')} "
+                            f"{body.get('message', '')}"
+                        )
+                    except Exception:
+                        detail = f" {exc.response.text[:200]}"
+                    last_error_message = (
+                        f"HTTP {exc.response.status_code}{detail}"
+                    )
                 except httpx.HTTPError as exc:
                     last_error_message = type(exc).__name__
                 except (RuntimeError, ValueError) as exc:
