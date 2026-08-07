@@ -47,6 +47,9 @@ jobs:
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
       BOCHA_API_KEY: ${{ secrets.BOCHA_API_KEY }}
       WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+      QQ_APP_ID: ${{ secrets.QQ_APP_ID }}
+      QQ_APP_SECRET: ${{ secrets.QQ_APP_SECRET }}
+      QQ_GROUP_OPENID: ${{ secrets.QQ_GROUP_OPENID }}
       PAPER_AS_OF_DATE: ${{ inputs.as_of_date || '' }}
       PAPER_JOB_MODE: ${{ github.event_name == 'schedule' && github.event.schedule == '0 12 * * *' && 'noon-position' || inputs.job_mode || 'daily-close' }}
       PAPER_FORCE_REINITIALIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_reinitialize || false }}

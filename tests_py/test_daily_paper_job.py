@@ -13,6 +13,7 @@ from scripts.daily_paper_job import (
     build_position_report,
     load_unified_config,
     run_daily_job,
+    send_qq_group_messages,
     send_wechat_markdown,
 )
 
@@ -166,6 +167,65 @@ def test_wechat_long_report_is_split_without_omitting_tail() -> None:
     assert len(captured) > 1
     assert any("完整交易计划 29" in message for message in captured)
     assert all(len(message.encode("utf-8")) < 3900 for message in captured)
+
+
+def test_qq_markdown_is_downgraded_to_plain_text() -> None:
+    markdown = (
+        "### 账户概览\n"
+        "> 信号日：**2026-08-06**\n"
+        "- 当前权益：**¥99,904.96**\n"
+        "- 新闻：[中煤能源公告](https://example.com/a)（搜狐证券）\n"
+    )
+    plain = daily_job._markdown_to_plain_text(markdown)
+
+    assert "账户概览" in plain
+    assert "###" not in plain
+    assert "**" not in plain
+    assert ">" not in plain
+    assert "信号日：2026-08-06" in plain
+    assert "中煤能源公告 (https://example.com/a)（搜狐证券）" in plain
+
+
+def test_qq_long_report_is_split_without_omitting_tail() -> None:
+    content = "\n\n".join(
+        f"#### 段落 {index}\n" + "理由内容" * 200 for index in range(12)
+    )
+    chunks = daily_job._split_qq_messages(content)
+
+    assert len(chunks) > 1
+    assert any("段落 11" in chunk for chunk in chunks)
+    assert all(len(chunk) <= daily_job.QQ_TEXT_CHUNK_LIMIT for chunk in chunks)
+
+
+def test_qq_payload_uses_token_and_checks_success() -> None:
+    requests: list[dict] = []
+    token_requested = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal token_requested
+        if request.url.path.endswith("/app/getAppAccessToken"):
+            token_requested = True
+            assert json.loads(request.content) == {
+                "appId": "APP_ID",
+                "clientSecret": "APP_SECRET",
+            }
+            return httpx.Response(200, json={"access_token": "TOKEN", "expires_in": 7200})
+        assert request.url.path == "/v2/groups/GROUP_OPENID/messages"
+        assert request.headers["Authorization"] == "QQBot TOKEN"
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"code": 0, "message": "ok"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        send_qq_group_messages(
+            "GROUP_OPENID",
+            "APP_ID",
+            "APP_SECRET",
+            "日报正文",
+            client=client,
+        )
+
+    assert token_requested
+    assert requests == [{"msg_type": 0, "content": "日报正文"}]
 
 
 def test_unified_config_resolves_secrets_and_all_runtime_settings(
