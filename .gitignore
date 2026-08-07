@@ -46,6 +46,10 @@ htmlcov/
 # misc
 .DS_Store
 *.pem
+*.tsbuildinfo
+
+# local service logs (scripts/run_local.py)
+logs/
 
 # debug
 npm-debug.log*

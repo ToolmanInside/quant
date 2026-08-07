@@ -31,32 +31,48 @@ test("server-renders the Quant Lab workspace", async () => {
   const html = await response.text();
   assert.match(html, /<title>Quant Lab｜本地策略工作台<\/title>/i);
   assert.match(html, /Quant Lab/);
-  assert.match(html, /双均线趋势/);
   assert.match(html, /中短期趋势组合驾驶舱/);
   assert.match(html, /不会发送真实订单/);
-  assert.match(html, /价格动量/);
-  assert.match(html, /通道突破/);
-  assert.match(html, /每日决策 · 回顾 · 分析/);
-  assert.match(html, /初始化并逐日历史推演/);
-  assert.match(html, /更新今日数据/);
+  // Tab 导航按钮必须出现在 SSR HTML 中
+  assert.match(html, /驾驶舱/);
+  assert.match(html, /决策日志/);
+  assert.match(html, /配置/);
+  // 驾驶舱 Tab（默认激活）的静态内容
+  assert.match(html, /当前持仓/);
+  assert.match(html, /下一交易日执行计划/);
+  // config tab 与 journal tab 是客户端渲染，不出现在 SSR HTML
   assert.doesNotMatch(html, /策略 × 交易频率评分矩阵|第一阶段/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
 test("keeps the dashboard connected to the local API", async () => {
+  // API_BASE 常量已提取到 shared.tsx
+  const shared = await readFile(
+    new URL("../app/shared.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(shared, /127\.0\.0\.1:8000/);
+  assert.match(shared, /NEXT_PUBLIC_API_BASE_URL/);
+
+  // quant-dashboard 仍然引用 PaperTrading
   const dashboard = await readFile(
     new URL("../app/quant-dashboard.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(dashboard, /127\.0\.0\.1:8000/);
-  assert.match(dashboard, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(dashboard, /PaperTrading/);
 
+  // paper-trading 仍调用 replay/advance API
   const paperTrading = await readFile(
     new URL("../app/paper-trading.tsx", import.meta.url),
     "utf8",
   );
   assert.match(paperTrading, /\/api\/paper\/replay/);
   assert.match(paperTrading, /\/api\/paper\/advance/);
-  assert.match(paperTrading, /BUY.*SELL.*CLOSE/s);
+
+  // actionLabel 已提取到 shared.tsx
+  const shared2 = await readFile(
+    new URL("../app/shared.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(shared2, /BUY.*SELL.*CLOSE/s);
 });

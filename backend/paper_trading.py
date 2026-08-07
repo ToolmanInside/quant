@@ -2003,6 +2003,7 @@ def replay_paper_simulation(
         request.strategy_id,
         corporate_actions,
     )
+    store.set_data_errors(errors)
     dashboard = store.dashboard(request.account_id)
     dashboard["run"] = {
         "mode": "replay",
@@ -2122,6 +2123,7 @@ def advance_paper_simulation(
             _calendar(frames),
             strategy_id,
         )
+    store.set_data_errors(errors)
     dashboard = store.dashboard(request.account_id)
     dashboard["run"] = {
         "mode": "advance",

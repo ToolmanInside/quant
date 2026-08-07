@@ -37,6 +37,7 @@ def _empty_document() -> dict[str, Any]:
         "daily_journals": [],
         "strategy_versions": [],
         "upgrade_events": [],
+        "data_errors": [],
         "counters": {
             "execution": 0,
             "corporate_action": 0,
@@ -263,6 +264,17 @@ class PaperStore:
             if existing["trade_date"] != snapshot["trade_date"]
         ]
         snapshots.append(item)
+        self._touch()
+
+    def set_data_errors(
+        self,
+        errors: list[dict[str, str]],
+    ) -> None:
+        """Replace persisted data-error log (one entry per symbol+error)."""
+        self._document["data_errors"] = [
+            {"symbol": e["symbol"], "message": e["message"]}
+            for e in errors
+        ]
         self._touch()
 
     def add_review(self, account_id: str, review: dict[str, Any]) -> None:
@@ -539,4 +551,5 @@ class PaperStore:
             "upgrade_events": upgrades,
             "equity_curve": snapshots,
             "holding_summary": holding_summary,
+            "data_errors": deepcopy(self._document.get("data_errors", [])),
         }
