@@ -267,6 +267,9 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
         "WECHAT_WEBHOOK_URL",
         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
     )
+    monkeypatch.setenv("QQ_APP_ID", "test-qq-app-id")
+    monkeypatch.setenv("QQ_APP_SECRET", "test-qq-app-secret")
+    monkeypatch.setenv("QQ_GROUP_OPENID", "test-qq-group-openid")
 
     config = load_unified_config(Path("config/quant-config.json"))
 
@@ -275,6 +278,9 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.market_universe.mode == "full_market"
     assert config.news_research.enabled
     assert config.wechat_webhook_url.endswith("key=test")
+    assert config.notification_provider == "qq"
+    assert config.qq_app_id == "test-qq-app-id"
+    assert config.qq_group_openid == "test-qq-group-openid"
     assert config.paper_account.frequency == "1d"
     assert config.paper_account.strategy_id == "moving_average"
     assert config.paper_account.risk_profile == "aggressive"
@@ -307,6 +313,9 @@ def test_unified_config_normalizes_symbols(tmp_path, monkeypatch) -> None:
         "WECHAT_WEBHOOK_URL",
         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
     )
+    monkeypatch.setenv("QQ_APP_ID", "test-qq-app-id")
+    monkeypatch.setenv("QQ_APP_SECRET", "test-qq-app-secret")
+    monkeypatch.setenv("QQ_GROUP_OPENID", "test-qq-group-openid")
     payload = json.loads(Path("config/quant-config.json").read_text(encoding="utf-8"))
     payload = deepcopy(payload)
     payload["paper_account"]["symbols"] = [
