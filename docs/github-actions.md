@@ -15,7 +15,7 @@
 3. 扫描全部上市 A 股，形成板块排名和详细候选池，再运行日频趋势策略。
 4. 使用 Bocha 检索领先板块和重点候选的近期新闻，进行低权重校验和重大风险否决。
 5. 生成下一交易日的买入、卖出、减仓或平仓计划。
-6. 将当前持仓、当前收益、历史最高收益、回撤、全市场研究和下一步计划推送到企业微信。
+6. 将当前持仓、当前收益、历史最高收益、回撤、全市场研究和下一步计划推送到飞书群机器人。
 7. 将 Markdown 日报和账户 TXT 备份为 GitHub Actions Artifact，保留 90 天。
 
 午间报告中的权益和收益来自最近一次完成的日线模拟快照，不是盘中实时价格或实时
@@ -35,7 +35,7 @@
 统一配置包括：
 
 - Tushare 数据源和 API Token。
-- 企业微信机器人开关、Webhook、超时和重试次数。
+- 飞书群机器人开关、Webhook、签名密钥、关键词、超时和重试次数。
 - 账户标识、初始资金、策略和固定交易频率。
 - 全市场/固定股票池模式、因子权重、候选池规模、回测起止日期、模拟盘起点。
 - Bocha 新闻开关、检索范围、最大查询数和新闻因子权重。
@@ -44,7 +44,7 @@
 - 推送标题、最大持仓展示数量和是否包含反思；交易计划始终完整展示，超长时分段推送。
 
 为了避免泄露密钥，已提交的配置保留 `${TUSHARE_TOKEN}`、`${BOCHA_API_KEY}`、
-`${WECHAT_WEBHOOK_URL}` 占位符，程序从本地环境变量或 GitHub Repository Secrets
+`${FEISHU_WEBHOOK_URL}` 占位符，程序从本地环境变量或 GitHub Repository Secrets
 读取真实值。GitHub Actions 与本地任务读取的是同一个配置文件。
 
 > GitHub 的 `schedule` 在检出仓库之前触发，不能动态读取 JSON。因此统一配置中的
@@ -57,12 +57,14 @@
 
 `Settings → Secrets and variables → Actions → New repository secret`
 
-添加三个 Repository secrets：
+添加以下 Repository secrets：
 
 - `TUSHARE_TOKEN`：Tushare Pro Token。
 - `BOCHA_API_KEY`：Bocha Web Search API Key。曾粘贴到聊天、日志或提交历史中的
   Key 必须先撤销再重建。
-- `WECHAT_WEBHOOK_URL`：企业微信群机器人完整 Webhook 地址。
+- `FEISHU_WEBHOOK_URL`：飞书群机器人完整 Webhook 地址。
+- `FEISHU_WEBHOOK_SECRET`：飞书机器人签名密钥（如启用签名校验）。
+- `FEISHU_WEBHOOK_KEYWORD`：飞书机器人自定义关键词（如启用关键词校验）。
 
 不要将真实密钥写进配置、工作流 YAML、账户 TXT 或日志。
 
@@ -121,23 +123,34 @@
 工作流合入默认分支后，可在 Actions 页面手动执行一次：
 
 1. 打开 `Actions → Daily paper trading → Run workflow`。
-2. 任务类型选择 `daily-close`，保持“推送企业微信”开启。
-3. 首次运行会自动完成历史回放并创建账户文本；账户初始化后才能运行
+2. 任务类型选择 `daily-close`，保持“推送飞书”开启。
+3. 如需从指定日期起重建模拟盘，在 `模拟盘起点` 填入 `YYYY-MM-DD`
+   （留空则沿用配置文件中的 `simulation_start_date`）；修改起点会触发
+   配置变更检测并自动重建账户。
+4. 首次运行会自动完成历史回放并创建账户文本；账户初始化后才能运行
    `noon-position` 午间报告。
 
 ## 七、本地试运行
 
-不推送企业微信：
+不推送飞书：
 
 ```powershell
-$env:PAPER_PUSH_WECHAT = "false"
+$env:PAPER_PUSH_FEISHU = "false"
 python scripts/daily_paper_job.py --config config/quant-config.json
 ```
 
-发送企业微信：
+发送飞书：
 
 ```powershell
 python scripts/daily_paper_job.py --config config/quant-config.json
+```
+
+从指定日期重建模拟盘：
+
+```powershell
+python scripts/daily_paper_job.py `
+  --config config/quant-config.json `
+  --simulation-start-date 2026-07-30
 ```
 
 本地预览午间盘位报告：

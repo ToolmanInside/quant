@@ -16,8 +16,8 @@ on:
         options:
           - daily-close
           - noon-position
-      as_of_date:
-        description: "任务日期（北京时间，留空表示今天）"
+      simulation_start_date:
+        description: "模拟盘起点（YYYY-MM-DD，留空使用配置文件值；修改后自动重建账户）"
         required: false
         type: string
       force_reinitialize:
@@ -25,8 +25,8 @@ on:
         required: false
         default: false
         type: boolean
-      push_wechat:
-        description: "推送企业微信"
+      push_feishu:
+        description: "推送飞书"
         required: false
         default: true
         type: boolean
@@ -46,14 +46,13 @@ jobs:
     env:
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
       BOCHA_API_KEY: ${{ secrets.BOCHA_API_KEY }}
-      WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
       FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
       FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
       FEISHU_WEBHOOK_KEYWORD: ${{ secrets.FEISHU_WEBHOOK_KEYWORD }}
-      PAPER_AS_OF_DATE: ${{ inputs.as_of_date || '' }}
+      PAPER_SIMULATION_START_DATE: ${{ inputs.simulation_start_date || '' }}
       PAPER_JOB_MODE: ${{ github.event_name == 'schedule' && github.event.schedule == '0 12 * * *' && 'noon-position' || inputs.job_mode || 'daily-close' }}
       PAPER_FORCE_REINITIALIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_reinitialize || false }}
-      PAPER_PUSH_WECHAT: ${{ github.event_name != 'workflow_dispatch' || inputs.push_wechat }}
+      PAPER_PUSH_FEISHU: ${{ github.event_name != 'workflow_dispatch' || inputs.push_feishu }}
       PYTHONUNBUFFERED: "1"
 
     steps:

@@ -1638,9 +1638,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument(
-        "--as-of-date",
-        default=os.getenv("PAPER_AS_OF_DATE") or None,
-        help="按 YYYY-MM-DD 指定任务日期；默认使用北京时间当天。",
+        "--simulation-start-date",
+        default=os.getenv("PAPER_SIMULATION_START_DATE") or None,
+        help=(
+            "按 YYYY-MM-DD 覆盖模拟盘起点（留空使用配置文件值；"
+            "修改后配置变更检测会自动重建账户）。"
+        ),
     )
     parser.add_argument(
         "--force-reinitialize",
@@ -1648,9 +1651,9 @@ def parse_args() -> argparse.Namespace:
         default=_environment_flag("PAPER_FORCE_REINITIALIZE", False),
     )
     parser.add_argument(
-        "--skip-wechat",
+        "--skip-push",
         action="store_true",
-        default=not _environment_flag("PAPER_PUSH_WECHAT", True),
+        default=not _environment_flag("PAPER_PUSH_FEISHU", True),
     )
     return parser.parse_args()
 
@@ -1664,12 +1667,17 @@ def main() -> int:
     try:
         unified = load_unified_config(args.config)
         config = unified.paper_account
+        if args.simulation_start_date:
+            # 覆盖模拟盘起点：配置变更检测会发现 simulation_start_date
+            # 不一致并自动重建账户（无需 force_reinitialize）。
+            config = replace(
+                config,
+                simulation_start_date=date.fromisoformat(
+                    args.simulation_start_date
+                ),
+            )
         timezone = ZoneInfo(unified.timezone)
-        as_of_date = (
-            date.fromisoformat(args.as_of_date)
-            if args.as_of_date
-            else datetime.now(timezone).date()
-        )
+        as_of_date = datetime.now(timezone).date()
         # 非交易日跳过逻辑统一由 run_daily_job 内的交易日历检查处理
         state_directory = args.state_directory or unified.state_directory
         state_path = state_directory / f"{config.account_id}.txt"
@@ -1709,7 +1717,7 @@ def main() -> int:
         report_path.write_text(report, encoding="utf-8")
         print(report)
 
-        if args.skip_wechat or not unified.wechat_enabled:
+        if args.skip_push or not unified.wechat_enabled:
             LOGGER.warning("已跳过消息推送")
         elif unified.notification_provider == "feishu":
             if not unified.feishu_webhook_url:
