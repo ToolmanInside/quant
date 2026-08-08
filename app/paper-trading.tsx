@@ -4,7 +4,6 @@ import { useEffect, useState, FormEvent } from "react";
 
 import type { PaperDashboard, PaperForm } from "./types";
 import {
-  API_BASE,
   api,
   localDate,
   parseSymbols,
@@ -189,7 +188,6 @@ export function PaperTrading() {
             busy={busy}
             onChangeForm={setForm}
             onSubmit={replay}
-            onAdvance={advance}
           />
         )}
       </div>

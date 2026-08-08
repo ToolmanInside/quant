@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.config import resolve_environment_placeholder
 from backend.data.providers import TushareDataProvider
 from backend.market_research import (
     DEFAULT_FACTOR_WEIGHTS,
@@ -85,7 +86,6 @@ class UnifiedConfig:
     timezone: str
     position_report_at: str
     daily_close_at: str
-    run_every_day: bool
     state_directory: Path
     midday_report_path: Path
     report_path: Path
@@ -110,13 +110,8 @@ def _resolve_environment_placeholder(
     *,
     required: bool = True,
 ) -> str:
-    text = str(value or "").strip()
-    match = re.fullmatch(r"\$\{([A-Z][A-Z0-9_]*)\}", text)
-    if match:
-        text = os.getenv(match.group(1), "").strip()
-    if not text and required:
-        raise ValueError(f"配置项 {field_name} 为空")
-    return text
+    # 统一实现在 backend/config.py；此别名保持 job 内部调用点不变。
+    return resolve_environment_placeholder(value, field_name, required=required)
 
 
 def _strict_bool(value: object, field_name: str, default: bool) -> bool:
@@ -338,11 +333,6 @@ def load_unified_config(path: Path) -> UnifiedConfig:
         timezone=timezone,
         position_report_at=position_report_at,
         daily_close_at=daily_close_at,
-        run_every_day=_strict_bool(
-            schedule.get("run_every_day"),
-            "schedule.run_every_day",
-            True,
-        ),
         state_directory=Path(
             storage.get("state_directory", ".quant-state/accounts")
         ),
@@ -1189,6 +1179,91 @@ def _active_market_universe(
         }
 
 
+def _advance_day_by_day(
+    provider: TushareDataProvider,
+    store: PaperStore,
+    config: JobConfig,
+    open_dates: list[date],
+    universe_config: MarketUniverseConfig,
+    news_config: NewsResearchConfig,
+    bocha_api_key: str,
+    *,
+    message_template: str,
+) -> tuple[dict[str, Any], list[str], JobConfig, dict[str, Any] | None]:
+    """逐日全市场截面扫描 + advance（重建与日常补算共用）。
+
+    对 open_dates 中的每个交易日：点对点重建候选池 → 持久化研究上下文 →
+    advance 一天。遇到收盘数据未发布的日期提前停止。
+    返回 (result, active_symbols, effective_config, market_research_summary)。
+    """
+    total_processed = 0
+    researched_days = 0
+    combined_errors: list[dict[str, str]] = []
+    result: dict[str, Any] = {}
+    active_symbols = list(config.symbols)
+    effective_config = config
+    market_research_summary: dict[str, Any] | None = None
+    for index, replay_date in enumerate(open_dates):
+        active_symbols, market_research_summary = _active_market_universe(
+            provider,
+            store,
+            config,
+            replay_date,
+            universe_config,
+            news_config,
+            bocha_api_key,
+            include_news=index == len(open_dates) - 1,
+        )
+        if (
+            market_research_summary
+            and market_research_summary.get("mode") == "full_market"
+            and market_research_summary.get("trade_date")
+            != replay_date.isoformat()
+        ):
+            market_research_summary["warnings"].append(
+                f"{replay_date} 收盘数据尚未完整发布，逐日推演在此停止。"
+            )
+            break
+        effective_config = replace(config, symbols=active_symbols)
+        _persist_research_context(
+            store,
+            effective_config,
+            active_symbols,
+            market_research_summary,
+        )
+        LOGGER.info(
+            "逐日推演 %s 的全市场截面；详细候选池 %s 只（%s/%s）",
+            replay_date,
+            len(active_symbols),
+            index + 1,
+            len(open_dates),
+        )
+        result = advance_paper_simulation(
+            PaperAdvanceRequest(
+                account_id=config.account_id,
+                symbols=effective_config.symbols,
+                as_of_date=replay_date,
+            ),
+            provider,
+            store,
+        )
+        metadata = result.get("run") or {}
+        total_processed += int(metadata.get("processed_days", 0))
+        researched_days += 1
+        combined_errors.extend(metadata.get("data_errors") or [])
+    result["run"] = {
+        **(result.get("run") or {}),
+        "processed_days": total_processed,
+        "data_errors": combined_errors,
+        "point_in_time_research_days": researched_days,
+        "message": message_template.format(
+            researched_days=researched_days,
+            total_processed=total_processed,
+        ),
+    }
+    return result, active_symbols, effective_config, market_research_summary
+
+
 def _persist_research_context(
     store: PaperStore,
     config: JobConfig,
@@ -1266,6 +1341,43 @@ def run_daily_job(
     )
     news_config = news_research or NewsResearchConfig(enabled=False)
     provider = TushareDataProvider(tushare_token)
+
+    # 非交易日不做全市场扫描和模拟推进（节假日 / 周末）
+    # force_reinitialize 时跳过此检查（强制重建必须执行）
+    if not force_reinitialize:
+        try:
+            trading_days = provider.fetch_open_dates(as_of_date, as_of_date)
+        except Exception as exc:
+            # 交易日历查询失败时视为交易日继续跑，但必须留下日志：
+            # 若是 token/网络问题，主流程会以更明确的方式失败。
+            LOGGER.warning(
+                "交易日历查询失败（%s: %s），按交易日继续执行",
+                type(exc).__name__,
+                exc,
+            )
+            trading_days = [as_of_date]
+        if not trading_days:
+            LOGGER.info(
+                "%s 不是交易日，跳过全市场扫描。", as_of_date
+            )
+            store = PaperStore(state_path)
+            try:
+                account = store.account(config.account_id)
+                if account is None:
+                    raise ValueError(
+                        "模拟账户尚未初始化且当天非交易日，请在交易日运行"
+                    )
+                dashboard = store.dashboard(config.account_id)
+                dashboard["run"] = {
+                    "mode": "skipped",
+                    "processed_days": 0,
+                    "data_errors": [],
+                    "message": f"{as_of_date} 非交易日，未执行模拟。",
+                }
+                return dashboard
+            finally:
+                store.close()
+
     store = PaperStore(state_path)
     try:
         account = store.account(config.account_id)
@@ -1348,70 +1460,24 @@ def run_daily_job(
 
                 # 第 3 步：逐日全市场截面扫描+advance
                 if open_dates:
-                    total_processed = 0
-                    researched_days = 0
-                    combined_errors: list[dict[str, str]] = []
-                    for index, replay_date in enumerate(open_dates):
-                        active_symbols, market_research_summary = (
-                            _active_market_universe(
-                                provider,
-                                store,
-                                config,
-                                replay_date,
-                                universe_config,
-                                news_config,
-                                bocha_api_key,
-                                include_news=index == len(open_dates) - 1,
-                            )
-                        )
-                        if (
-                            market_research_summary
-                            and market_research_summary.get("mode") == "full_market"
-                            and market_research_summary.get("trade_date")
-                            != replay_date.isoformat()
-                        ):
-                            market_research_summary["warnings"].append(
-                                f"{replay_date} 收盘数据尚未完整发布，"
-                                "逐日重建在此停止。"
-                            )
-                            break
-                        effective_config = replace(config, symbols=active_symbols)
-                        _persist_research_context(
-                            store,
-                            effective_config,
-                            active_symbols,
-                            market_research_summary,
-                        )
-                        LOGGER.info(
-                            "重建 %s 全市场截面；详细候选池 %s 只（%s/%s）",
-                            replay_date,
-                            len(active_symbols),
-                            index + 1,
-                            len(open_dates),
-                        )
-                        result = advance_paper_simulation(
-                            PaperAdvanceRequest(
-                                account_id=config.account_id,
-                                symbols=effective_config.symbols,
-                                as_of_date=replay_date,
-                            ),
-                            provider,
-                            store,
-                        )
-                        metadata = result.get("run") or {}
-                        total_processed += int(metadata.get("processed_days", 0))
-                        researched_days += 1
-                        combined_errors.extend(metadata.get("data_errors") or [])
-                    result["run"] = {
-                        **(result.get("run") or {}),
-                        "processed_days": total_processed,
-                        "data_errors": combined_errors,
-                        "point_in_time_research_days": researched_days,
-                        "message": (
-                            f"重建完成：回放模拟首日 + 逐日全市场截面扫描 "
-                            f"{researched_days} 天，共处理 {total_processed} 个交易日。"
+                    (
+                        result,
+                        active_symbols,
+                        effective_config,
+                        market_research_summary,
+                    ) = _advance_day_by_day(
+                        provider,
+                        store,
+                        config,
+                        open_dates,
+                        universe_config,
+                        news_config,
+                        bocha_api_key,
+                        message_template=(
+                            "重建完成：回放模拟首日 + 逐日全市场截面扫描 "
+                            "{researched_days} 天，共处理 {total_processed} 个交易日。"
                         ),
-                    }
+                    )
                 else:
                     # 只有模拟首日，无后续交易日
                     active_symbols, market_research_summary = (
@@ -1470,65 +1536,23 @@ def run_daily_job(
                 )
 
             if open_dates:
-                total_processed = 0
-                researched_days = 0
-                combined_errors: list[dict[str, str]] = []
-                result = {}
-                for index, replay_date in enumerate(open_dates):
-                    active_symbols, market_research_summary = (
-                        _active_market_universe(
-                            provider,
-                            store,
-                            config,
-                            replay_date,
-                            universe_config,
-                            news_config,
-                            bocha_api_key,
-                            include_news=index == len(open_dates) - 1,
-                        )
-                    )
-                    if (
-                        market_research_summary
-                        and market_research_summary.get("mode") == "full_market"
-                        and market_research_summary.get("trade_date")
-                        != replay_date.isoformat()
-                    ):
-                        market_research_summary["warnings"].append(
-                            f"{replay_date} 收盘数据尚未完整发布，逐日补算在此停止。"
-                        )
-                        break
-                    effective_config = replace(config, symbols=active_symbols)
-                    _persist_research_context(
-                        store,
-                        effective_config,
-                        active_symbols,
-                        market_research_summary,
-                    )
-                    LOGGER.info(
-                        "逐日重建 %s 的全市场截面；详细候选池 %s 只",
-                        replay_date,
-                        len(active_symbols),
-                    )
-                    result = advance_paper_simulation(
-                        PaperAdvanceRequest(
-                            account_id=config.account_id,
-                            symbols=effective_config.symbols,
-                            as_of_date=replay_date,
-                        ),
-                        provider,
-                        store,
-                    )
-                    metadata = result.get("run") or {}
-                    total_processed += int(metadata.get("processed_days", 0))
-                    researched_days += 1
-                    combined_errors.extend(metadata.get("data_errors") or [])
-                result["run"] = {
-                    **(result.get("run") or {}),
-                    "processed_days": total_processed,
-                    "data_errors": combined_errors,
-                    "point_in_time_research_days": researched_days,
-                    "message": f"已逐日重建并处理 {total_processed} 个新交易日。",
-                }
+                (
+                    result,
+                    active_symbols,
+                    effective_config,
+                    market_research_summary,
+                ) = _advance_day_by_day(
+                    provider,
+                    store,
+                    config,
+                    open_dates,
+                    universe_config,
+                    news_config,
+                    bocha_api_key,
+                    message_template=(
+                        "已逐日重建并处理 {total_processed} 个新交易日。"
+                    ),
+                )
             else:
                 if config.universe_mode == "full_market":
                     active_symbols, market_research_summary = (
@@ -1646,9 +1670,7 @@ def main() -> int:
             if args.as_of_date
             else datetime.now(timezone).date()
         )
-        if not unified.run_every_day and as_of_date.weekday() >= 5:
-            LOGGER.info("统一配置已关闭周末运行，本次任务无需处理")
-            return 0
+        # 非交易日跳过逻辑统一由 run_daily_job 内的交易日历检查处理
         state_directory = args.state_directory or unified.state_directory
         state_path = state_directory / f"{config.account_id}.txt"
         generated_at = datetime.now(timezone)

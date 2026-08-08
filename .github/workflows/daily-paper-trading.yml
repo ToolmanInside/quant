@@ -94,14 +94,25 @@ jobs:
           path: backend/data/cache
           key: quant-market-cache-v1-${{ github.run_id }}
 
-      # 将账户状态提交到 Git（日终任务后）
+      # 将账户状态提交到 Git（日终任务后）；push 前 rebase 防止与手动提交冲突
       - name: Commit account state
         if: ${{ env.PAPER_JOB_MODE == 'daily-close' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .quant-state/accounts/*.txt
-          git diff --cached --quiet || git commit -m "chore: update paper account state [skip ci]"
+          if git diff --cached --quiet; then
+            echo "No account state changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: update paper account state [skip ci]"
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push failed (attempt $attempt); rebasing onto latest remote..."
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}" || exit 1
+          done
           git push
 
       - name: Upload daily report and account text backup

@@ -38,32 +38,6 @@ def is_etf(symbol: str) -> bool:
     return code.startswith(("15", "16", "50", "51", "52", "53", "56", "58"))
 
 
-class BacktestRequest(BaseModel):
-    symbol: str = Field(default="000001.SZ")
-    start_date: date = date(2024, 1, 1)
-    end_date: date = date(2025, 12, 31)
-    short_window: int = Field(default=5, ge=2, le=120)
-    long_window: int = Field(default=20, ge=3, le=250)
-    initial_cash: float = Field(default=100_000, ge=10_000, le=100_000_000)
-    commission_rate: float = Field(default=0.0003, ge=0, le=0.01)
-    minimum_commission: float = Field(default=5.0, ge=0, le=100)
-    stamp_tax_rate: float = Field(default=0.0005, ge=0, le=0.01)
-    slippage_bps: float = Field(default=2.0, ge=0, le=100)
-
-    @field_validator("symbol", mode="before")
-    @classmethod
-    def normalize_symbol(cls, value: object) -> str:
-        return normalize_ts_code(value)
-
-    @model_validator(mode="after")
-    def validate_range(self) -> "BacktestRequest":
-        if self.start_date >= self.end_date:
-            raise ValueError("开始日期必须早于结束日期")
-        if self.short_window >= self.long_window:
-            raise ValueError("短均线周期必须小于长均线周期")
-        return self
-
-
 DEFAULT_MATRIX_SYMBOLS = [
     "159611.SZ",
     "002317.SZ",
@@ -79,41 +53,6 @@ DEFAULT_MATRIX_SYMBOLS = [
     "002371.SZ",
     "688008.SH",
 ]
-
-
-class StrategyMatrixRequest(BaseModel):
-    symbols: list[str] = Field(default_factory=lambda: DEFAULT_MATRIX_SYMBOLS.copy())
-    start_date: date = date(2020, 1, 1)
-    end_date: date = date(2025, 12, 31)
-    initial_cash: float = Field(default=100_000, ge=10_000, le=100_000_000)
-    commission_rate: float = Field(default=0.0003, ge=0, le=0.01)
-    minimum_commission: float = Field(default=5.0, ge=0, le=100)
-    stamp_tax_rate: float = Field(default=0.0005, ge=0, le=0.01)
-    slippage_bps: float = Field(default=2.0, ge=0, le=100)
-
-    @field_validator("symbols", mode="before")
-    @classmethod
-    def normalize_symbols(cls, value: object) -> list[str]:
-        if isinstance(value, str):
-            raw_symbols = [part for part in re.split(r"[\s,，;；]+", value) if part]
-        elif isinstance(value, list):
-            raw_symbols = value
-        else:
-            raise ValueError("标的池必须是证券代码列表")
-
-        normalized = list(dict.fromkeys(normalize_ts_code(item) for item in raw_symbols))
-        if not normalized:
-            raise ValueError("标的池不能为空")
-        if len(normalized) > 50:
-            raise ValueError("单次最多评测 50 个标的")
-        return normalized
-    @model_validator(mode="after")
-    def validate_range(self) -> "StrategyMatrixRequest":
-        if self.start_date >= self.end_date:
-            raise ValueError("开始日期必须早于结束日期")
-        if (self.end_date - self.start_date).days < 365:
-            raise ValueError("策略矩阵至少需要一年的历史区间")
-        return self
 
 
 class PaperSimulationRequest(BaseModel):

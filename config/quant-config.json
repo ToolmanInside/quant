@@ -34,8 +34,7 @@
   "schedule": {
     "timezone": "Asia/Shanghai",
     "position_report_at": "12:00",
-    "daily_close_at": "18:00",
-    "run_every_day": true
+    "daily_close_at": "18:00"
   },
   "paper_account": {
     "account_id": "github-actions",

@@ -12,6 +12,19 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Python/tooling directories that eslint must not traverse:
+    ".pytest_cache/**",
+    ".venv/**",
+    ".quant-state/**",
+    ".npm-cache/**",
+    ".pip-cache/**",
+    ".pnpm-store/**",
+    "backend/**",
+    "tests_py/**",
+    "scripts/**",
+    "logs/**",
+    "outputs/**",
+    "dist/**",
   ]),
 ]);
 

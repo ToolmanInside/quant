@@ -28,6 +28,7 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 }
 
 & $venvPython -m pip install -r (Join-Path $projectRoot "requirements.txt")
+& $venvPython -m pip install -r (Join-Path $projectRoot "requirements-dev.txt")
 
 $envFile = Join-Path $projectRoot ".env"
 $exampleEnvFile = Join-Path $projectRoot ".env.example"

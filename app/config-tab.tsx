@@ -9,10 +9,9 @@ type Props = {
   busy: "replay" | "advance" | null;
   onChangeForm: (next: PaperForm) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
-  onAdvance: () => void;
 };
 
-export function ConfigTab({ form, dashboard, busy, onChangeForm, onSubmit, onAdvance }: Props) {
+export function ConfigTab({ form, dashboard, busy, onChangeForm, onSubmit }: Props) {
   return (
     <div className="config-tab">
       <form className="config-form" onSubmit={onSubmit}>
@@ -160,17 +159,8 @@ export function ConfigTab({ form, dashboard, busy, onChangeForm, onSubmit, onAdv
           {busy === "replay" ? "正在逐日推演…" : "初始化并逐日历史推演"}
         </button>
 
-        <button
-          className="secondary-btn"
-          type="button"
-          disabled={busy !== null || !dashboard}
-          onClick={onAdvance}
-        >
-          {busy === "advance" ? "正在更新今日数据…" : "更新今日数据"}
-        </button>
-
         <p className="config-warning">
-          初始化会重置同名虚拟账户。回测终点必须早于模拟起点；模拟起点当天收盘生成首批信号，下一交易日才可能成交。
+          初始化会重置同名虚拟账户。回测终点必须早于模拟起点；模拟起点当天收盘生成首批信号，下一交易日才可能成交。日常「更新今日数据」在驾驶舱执行。
         </p>
       </form>
 

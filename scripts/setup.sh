@@ -27,6 +27,7 @@ fi
 
 echo "==> 安装 Python 依赖…"
 "$VENV_PYTHON" -m pip install -r requirements.txt
+"$VENV_PYTHON" -m pip install -r requirements-dev.txt
 
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then

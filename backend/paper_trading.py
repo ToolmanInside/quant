@@ -10,12 +10,63 @@ import numpy as np
 import pandas as pd
 
 from backend.data.providers import TushareDataProvider
-from backend.matrix import _metrics
 from backend.models import PaperAdvanceRequest, PaperSimulationRequest, is_etf
 from backend.paper_store import PaperStore
 
 
 logger = logging.getLogger("uvicorn.error")
+
+
+def _metrics(equity: pd.Series) -> dict:
+    """权益序列绩效指标（原 backend/matrix.py，矩阵回测下线后迁移至此）。"""
+    if len(equity) < 3:
+        return {
+            "total_return": 0.0,
+            "annualized_return": 0.0,
+            "max_drawdown": 0.0,
+            "sharpe": 0.0,
+            "calmar": 0.0,
+        }
+
+    equity = equity.astype(float)
+    start_value = float(equity.iloc[0])
+    end_value = float(equity.iloc[-1])
+    elapsed_days = max((equity.index[-1] - equity.index[0]).days, 1)
+    years = max(elapsed_days / 365.25, 1 / 252)
+    total_return = end_value / start_value - 1
+    annualized_return = (
+        (end_value / start_value) ** (1 / years) - 1 if end_value > 0 else -1
+    )
+    daily_equity = equity.groupby(equity.index.normalize()).last()
+    daily_returns = daily_equity.pct_change().dropna()
+    standard_deviation = float(daily_returns.std(ddof=0))
+    observed_dates = daily_equity.index.to_series().sort_values()
+    median_spacing_days = float(
+        observed_dates.diff().dropna().dt.total_seconds().median() / 86_400
+    )
+    periods_per_year = min(
+        252.0,
+        365.25 / max(median_spacing_days, 1.0),
+    )
+    sharpe = (
+        float(daily_returns.mean() / standard_deviation * math.sqrt(periods_per_year))
+        if standard_deviation > 0
+        else 0.0
+    )
+    drawdown = equity / equity.cummax() - 1
+    max_drawdown = float(drawdown.min())
+    calmar = (
+        annualized_return / abs(max_drawdown)
+        if max_drawdown < -1e-9
+        else 0.0
+    )
+    return {
+        "total_return": total_return,
+        "annualized_return": annualized_return,
+        "max_drawdown": max_drawdown,
+        "sharpe": sharpe,
+        "calmar": calmar,
+    }
 
 STRATEGY_NAMES = {
     "moving_average": "双均线趋势",
