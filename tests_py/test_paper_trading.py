@@ -419,11 +419,17 @@ def test_weight_allocator_reserves_an_executable_board_lot() -> None:
 
 def test_aggressive_profile_raises_defensive_exposure() -> None:
     frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
+    params = {
+        **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        "adx_min": 0,
+        "volume_confirm_ratio": 1.0,
+        "cross_valid_days": 500,
+    }
     result = _analyze(
         pd.Timestamp("2025-12-31"),
         frames,
         FakeProvider().fetch_industries(SYMBOLS),
-        VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        params,
         {},
         100_000,
         "moving_average",
@@ -440,6 +446,9 @@ def test_configured_minimum_exposure_is_suspended_in_defensive_regime() -> None:
     params = {
         **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
         "minimum_exposure": 0.70,
+        "adx_min": 0,
+        "volume_confirm_ratio": 1.0,
+        "cross_valid_days": 500,
     }
     result = _analyze(
         pd.Timestamp("2025-12-31"),
@@ -465,6 +474,9 @@ def test_configured_minimum_exposure_applies_in_offensive_regime() -> None:
     params = {
         **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
         "minimum_exposure": 0.70,
+        "adx_min": 0,
+        "volume_confirm_ratio": 1.0,
+        "cross_valid_days": 500,
     }
     result = _analyze(
         pd.Timestamp("2025-12-31"),
@@ -495,6 +507,10 @@ def test_etf_fallback_fills_gap_when_stock_pool_is_too_small() -> None:
     params = {
         **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
         "minimum_exposure": 0.70,
+        "adx_min": 0,
+        "volume_confirm_ratio": 1.0,
+        "etf_volume_confirm_ratio": 1.0,
+        "cross_valid_days": 500,
     }
     result = _analyze(
         pd.Timestamp("2025-12-31"),
@@ -604,6 +620,169 @@ def test_ma_golden_cross_requires_volume_confirmation() -> None:
     assert target in run_analysis(high_volume)
 
 
+def test_ma_entry_cannot_bypass_failed_cross_confirmation_next_day() -> None:
+    """低量金叉被拒后，次日仍不得仅凭多头排列绕过确认。"""
+    params = VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]]
+    target = SYMBOLS[0]
+    target_frame = ma_cross_frame(cross_today=True, cross_day_volume_ratio=1.0)
+    next_row = target_frame.iloc[-1].copy()
+    next_row["trade_date"] = pd.Timestamp(next_row["trade_date"]) + pd.offsets.BDay(1)
+    next_row["volume"] = 8_000_000
+    next_row["amount"] = float(next_row["close"]) * float(next_row["volume"])
+    target_frame = pd.concat(
+        [target_frame, pd.DataFrame([next_row])],
+        ignore_index=True,
+    )
+    frames = {
+        symbol: ma_cross_frame(cross_today=False)
+        for symbol in SYMBOLS[1:5]
+    }
+    frames[target] = target_frame
+    trade_date = pd.Timestamp(target_frame["trade_date"].iloc[-1])
+
+    result = _analyze(
+        trade_date,
+        frames,
+        FakeProvider().fetch_industries(SYMBOLS[:5]),
+        params,
+        {},
+        100_000,
+        "moving_average",
+        {"technical_breadth": {"composite": 0.90, "coverage": 0.95}},
+    )
+
+    feature = result["features"][target]
+    assert not bool(feature["ma_cross_up"])
+    assert feature["days_since_cross"] == 1
+    assert feature["cross_volume_ratio"] < float(params["volume_confirm_ratio"])
+    assert not bool(feature["eligible"])
+    assert target not in result["selected_symbols"]
+
+
+def test_ma_entry_requires_adx_direction_and_respects_reentry_cooldown() -> None:
+    target = SYMBOLS[0]
+    target_frame = ma_cross_frame(cross_today=True, cross_day_volume_ratio=2.0)
+    trade_date = pd.Timestamp(target_frame["trade_date"].iloc[-1])
+    frames = {
+        symbol: ma_cross_frame(cross_today=False)
+        for symbol in SYMBOLS[1:5]
+    }
+    frames[target] = target_frame
+    industries = FakeProvider().fetch_industries(SYMBOLS[:5])
+    params = VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]]
+
+    high_adx_floor = {**params, "adx_min": 101}
+    adx_blocked = _analyze(
+        trade_date,
+        frames,
+        industries,
+        high_adx_floor,
+        {},
+        100_000,
+        "moving_average",
+    )
+    assert target not in adx_blocked["selected_symbols"]
+
+    cooldown_blocked = _analyze(
+        trade_date,
+        frames,
+        industries,
+        params,
+        {},
+        100_000,
+        "moving_average",
+        last_exit_dates={
+            target: pd.Timestamp(target_frame["trade_date"].iloc[-2]).date().isoformat()
+        },
+    )
+    assert target not in cooldown_blocked["selected_symbols"]
+
+
+def test_ma_shallow_death_cross_requires_confirmation_before_close() -> None:
+    target = SYMBOLS[0]
+    target_frame = ma_cross_frame(cross_today=False).copy()
+    close = target_frame["adj_close"].astype(float)
+    equality_price = (
+        float(close.iloc[-20:-1].sum())
+        - 4 * float(close.iloc[-5:-1].sum())
+    ) / 3
+    shallow_price = equality_price - 0.01
+    last_index = target_frame.index[-1]
+    for column in ("open", "close", "adj_open", "adj_close"):
+        target_frame.loc[last_index, column] = shallow_price
+    for column in ("high", "adj_high"):
+        target_frame.loc[last_index, column] = shallow_price * 1.01
+    for column in ("low", "adj_low"):
+        target_frame.loc[last_index, column] = shallow_price * 0.99
+    target_frame.loc[last_index, "amount"] = (
+        shallow_price * float(target_frame.loc[last_index, "volume"])
+    )
+
+    params = {
+        **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        "minimum_score": 0.0,
+        "minimum_amount": 0.0,
+    }
+    positions = {
+        target: {
+            "shares": 1_000,
+            "avg_price": 1.0,
+            "name": "测试股票",
+            "sector": "行业0",
+            "entry_date": "2025-01-01",
+        }
+    }
+    frames = {
+        symbol: ma_cross_frame(cross_today=False)
+        for symbol in SYMBOLS[1:5]
+    }
+    frames[target] = target_frame
+    industries = FakeProvider().fetch_industries(SYMBOLS[:5])
+    first_date = pd.Timestamp(target_frame["trade_date"].iloc[-1])
+
+    first = _analyze(
+        first_date,
+        frames,
+        industries,
+        params,
+        positions,
+        100_000,
+        "moving_average",
+    )
+    first_feature = first["features"][target]
+    assert first_feature["fast_ma"] < first_feature["slow_ma"]
+    assert first_feature["fast_ma"] > first_feature["slow_ma"] * 0.995
+    assert first_feature["below_slow_days"] == 1
+    assert not any(
+        item["symbol"] == target and item["action"] == "CLOSE"
+        for item in first["plan"]
+    )
+
+    second_row = target_frame.iloc[-1].copy()
+    second_row["trade_date"] = first_date + pd.offsets.BDay(1)
+    target_frame = pd.concat(
+        [target_frame, pd.DataFrame([second_row])],
+        ignore_index=True,
+    )
+    frames[target] = target_frame
+    second = _analyze(
+        pd.Timestamp(target_frame["trade_date"].iloc[-1]),
+        frames,
+        industries,
+        params,
+        positions,
+        100_000,
+        "moving_average",
+    )
+    assert second["features"][target]["below_slow_days"] >= 2
+    assert any(
+        item["symbol"] == target
+        and item["action"] == "CLOSE"
+        and "确认跌破" in item["reason"]
+        for item in second["plan"]
+    )
+
+
 def test_analysis_skips_symbols_whose_board_lot_exceeds_position_cap() -> None:
     frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
     for frame in frames.values():
@@ -620,11 +799,17 @@ def test_analysis_skips_symbols_whose_board_lot_exceeds_position_cap() -> None:
             frame[column] *= 50
         frame["amount"] *= 50
 
+    params = {
+        **VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        "adx_min": 0,
+        "volume_confirm_ratio": 1.0,
+        "cross_valid_days": 500,
+    }
     result = _analyze(
         pd.Timestamp("2025-12-31"),
         frames,
         FakeProvider().fetch_industries(SYMBOLS),
-        VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]],
+        params,
         {},
         100_000,
         "moving_average",
@@ -695,6 +880,50 @@ def test_execution_records_partial_fill_and_allocation_gap(tmp_path) -> None:
     partial = next(item for item in outcomes if item["fill_ratio"] < 1)
     assert partial["constraint_reason"] == "insufficient_cash_partial_fill"
     assert partial["allocation_gap"] < 0
+    store.close()
+
+
+def test_successful_close_records_reentry_cooldown_date(tmp_path) -> None:
+    symbol = SYMBOLS[0]
+    trade_date = pd.Timestamp("2025-12-31")
+    store = PaperStore(tmp_path / "paper.txt")
+    store.reset_account("default", 100_000, [symbol], "v1.0-balanced")
+    account = store.account("default")
+    assert account is not None
+    account["pending_plan"] = [
+        {
+            "symbol": symbol,
+            "name": symbol,
+            "sector": "测试行业",
+            "action": "CLOSE",
+            "target_weight": 0.0,
+            "reason": "测试冷却期",
+        }
+    ]
+    positions = {
+        symbol: {
+            "name": symbol,
+            "sector": "测试行业",
+            "shares": 1_000,
+            "avg_price": 10.0,
+            "cost_basis_total": 10_000.0,
+            "entry_date": "2025-01-01",
+        }
+    }
+
+    executions, _ = _execute_pending(
+        account,
+        positions,
+        trade_date,
+        {symbol: market_frame(0)},
+        FakeProvider().fetch_industries([symbol]),
+        store,
+        PaperCosts(),
+    )
+
+    assert executions[0]["action"] == "CLOSE"
+    assert symbol not in positions
+    assert account["last_exit_dates"][symbol] == "2025-12-31"
     store.close()
 
 
@@ -815,11 +1044,17 @@ def test_version_evaluation_uses_only_matching_daily_market_context() -> None:
     frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
     dates = list(pd.bdate_range("2025-01-01", "2025-12-31"))
     industries = FakeProvider().fetch_industries(SYMBOLS)
+    params = {
+        **VERSION_LIBRARY["v1.0-balanced"],
+        "adx_min": 0,
+        "volume_confirm_ratio": 1.0,
+        "cross_valid_days": 500,
+    }
     without_context = _evaluate_version(
         frames,
         industries,
         dates,
-        VERSION_LIBRARY["v1.0-balanced"],
+        params,
         "moving_average",
     )
     defensive_context = {
@@ -832,7 +1067,7 @@ def test_version_evaluation_uses_only_matching_daily_market_context() -> None:
         frames,
         industries,
         dates,
-        VERSION_LIBRARY["v1.0-balanced"],
+        params,
         "moving_average",
         defensive_context,
     )
@@ -844,11 +1079,17 @@ def test_version_evaluation_is_invariant_to_adjusted_price_anchor() -> None:
     frames = {symbol: market_frame(index) for index, symbol in enumerate(SYMBOLS)}
     dates = list(pd.bdate_range("2025-01-01", "2025-12-31"))
     industries = FakeProvider().fetch_industries(SYMBOLS)
+    params = {
+        **VERSION_LIBRARY["v1.0-balanced"],
+        "adx_min": 0,
+        "volume_confirm_ratio": 1.0,
+        "cross_valid_days": 500,
+    }
     baseline = _evaluate_version(
         frames,
         industries,
         dates,
-        VERSION_LIBRARY["v1.0-balanced"],
+        params,
         "moving_average",
     )
     reanchored = {symbol: frame.copy() for symbol, frame in frames.items()}
@@ -860,11 +1101,18 @@ def test_version_evaluation_is_invariant_to_adjusted_price_anchor() -> None:
         reanchored,
         industries,
         dates,
-        VERSION_LIBRARY["v1.0-balanced"],
+        params,
         "moving_average",
     )
 
     assert result == baseline
+    assert baseline["estimated_transaction_cost"] > 0
+    assert abs(
+        baseline["estimated_transaction_cost"]
+        - baseline["estimated_commission"]
+        - baseline["estimated_stamp_tax"]
+        - baseline["estimated_slippage"]
+    ) <= 0.02
 
 
 def test_advance_forces_existing_holdings_into_requested_universe(tmp_path) -> None:

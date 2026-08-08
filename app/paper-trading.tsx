@@ -25,6 +25,13 @@ const DEFAULT_FORM: PaperForm = {
   universe_mode: "full_market",
   risk_profile: "balanced",
   minimum_invested_ratio: 0,
+  adx_window: 14,
+  adx_min: 20,
+  volume_confirm_ratio: 1.5,
+  cross_valid_days: 3,
+  death_cross_confirm_days: 2,
+  death_cross_buffer: 0.005,
+  reentry_cooldown_days: 5,
   symbols: DEFAULT_SYMBOLS,
   backtest_start_date: "2024-01-01",
   backtest_end_date: "2025-12-31",
@@ -63,6 +70,24 @@ export function PaperTrading() {
           minimum_invested_ratio:
             value.account.configuration.minimum_invested_ratio ??
             current.minimum_invested_ratio,
+          adx_window:
+            value.account.configuration.adx_window ?? current.adx_window,
+          adx_min: value.account.configuration.adx_min ?? current.adx_min,
+          volume_confirm_ratio:
+            value.account.configuration.volume_confirm_ratio ??
+            current.volume_confirm_ratio,
+          cross_valid_days:
+            value.account.configuration.cross_valid_days ??
+            current.cross_valid_days,
+          death_cross_confirm_days:
+            value.account.configuration.death_cross_confirm_days ??
+            current.death_cross_confirm_days,
+          death_cross_buffer:
+            value.account.configuration.death_cross_buffer ??
+            current.death_cross_buffer,
+          reentry_cooldown_days:
+            value.account.configuration.reentry_cooldown_days ??
+            current.reentry_cooldown_days,
           backtest_start_date:
             value.account.configuration.backtest_start_date ??
             current.backtest_start_date,

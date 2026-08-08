@@ -153,6 +153,11 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "adx_window": 14,
         "adx_min": 20,
         "volume_confirm_ratio": 1.5,
+        "etf_volume_confirm_ratio": 1.2,
+        "cross_valid_days": 3,
+        "death_cross_confirm_days": 2,
+        "death_cross_buffer": 0.005,
+        "reentry_cooldown_days": 5,
     },
     "v1.1-defensive": {
         "name": "防守型趋势",
@@ -178,6 +183,11 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "adx_window": 14,
         "adx_min": 20,
         "volume_confirm_ratio": 1.5,
+        "etf_volume_confirm_ratio": 1.2,
+        "cross_valid_days": 3,
+        "death_cross_confirm_days": 2,
+        "death_cross_buffer": 0.005,
+        "reentry_cooldown_days": 5,
     },
     "v1.2-responsive": {
         "name": "灵敏型趋势",
@@ -203,6 +213,11 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "adx_window": 14,
         "adx_min": 20,
         "volume_confirm_ratio": 1.5,
+        "etf_volume_confirm_ratio": 1.2,
+        "cross_valid_days": 3,
+        "death_cross_confirm_days": 2,
+        "death_cross_buffer": 0.005,
+        "reentry_cooldown_days": 5,
     },
     "v1.0-aggressive": {
         "name": "进取型中短期趋势",
@@ -228,6 +243,11 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "adx_window": 14,
         "adx_min": 20,
         "volume_confirm_ratio": 1.5,
+        "etf_volume_confirm_ratio": 1.2,
+        "cross_valid_days": 3,
+        "death_cross_confirm_days": 2,
+        "death_cross_buffer": 0.005,
+        "reentry_cooldown_days": 5,
         "board_lot_price_buffer": 1.10,
     },
 }
@@ -236,6 +256,33 @@ RISK_PROFILE_INITIAL_VERSION = {
     "balanced": "v1.0-balanced",
     "aggressive": "v1.0-aggressive",
 }
+
+CONFIGURABLE_SIGNAL_PARAMS = (
+    "adx_window",
+    "adx_min",
+    "volume_confirm_ratio",
+    "cross_valid_days",
+    "death_cross_confirm_days",
+    "death_cross_buffer",
+    "reentry_cooldown_days",
+)
+
+
+def _effective_params(
+    base: dict[str, Any],
+    configuration: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge persisted, user-visible signal controls into version parameters."""
+    configured = configuration or {}
+    return {
+        **base,
+        **{
+            name: configured[name]
+            for name in CONFIGURABLE_SIGNAL_PARAMS
+            if name in configured
+        },
+        "minimum_exposure": float(configured.get("minimum_invested_ratio", 0.0)),
+    }
 
 # 宽基ETF兜底池：个股优选不足时用市场beta补足最低仓位。
 # 均为一手成本远低于10万元资金规模的品种，且不需要科创板等额外权限。
@@ -447,13 +494,13 @@ def _last_row_on_or_before(
     return None if index < 0 else frame.iloc[index]
 
 
-def _adx_series(
+def _directional_series(
     high: pd.Series,
     low: pd.Series,
     close: pd.Series,
     window: int = 14,
-) -> pd.Series:
-    """Wilder 平均趋向指数 ADX：衡量趋势强度，震荡市低、趋势市高。"""
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Return Wilder ADX, +DI and -DI series."""
     up_move = high.diff()
     down_move = -low.diff()
     plus_dm = pd.Series(
@@ -475,7 +522,18 @@ def _adx_series(
     plus_di = 100 * plus_dm.ewm(alpha=1 / window, adjust=False).mean() / atr
     minus_di = 100 * minus_dm.ewm(alpha=1 / window, adjust=False).mean() / atr
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-    return dx.ewm(alpha=1 / window, adjust=False).mean()
+    adx = dx.ewm(alpha=1 / window, adjust=False).mean()
+    return adx, plus_di, minus_di
+
+
+def _adx_series(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    window: int = 14,
+) -> pd.Series:
+    """Wilder 平均趋向指数 ADX：衡量趋势强度，震荡市低、趋势市高。"""
+    return _directional_series(high, low, close, window)[0]
 
 
 def _feature_row(
@@ -515,26 +573,46 @@ def _feature_row(
     returns = close.pct_change().tail(20).dropna()
     volatility = float(returns.std(ddof=0) * math.sqrt(252))
     average_amount = float(history["amount"].astype(float).tail(20).mean())
-    average_volume = float(history["volume"].astype(float).tail(20).mean())
+    volume = history["volume"].astype(float)
+    average_volume = float(volume.tail(20).mean())
     volume_ratio = (
         float(last["volume"]) / average_volume if average_volume > 0 else 0.0
     )
-    # 金叉事件：昨日快线未上穿，今日上穿（用于"金叉日需ADX+放量确认"）。
+    # 金叉事件及其确认状态。金叉日量比使用此前20日均量，避免把当日
+    # 放量同时计入分母；最近有效窗口可防止金叉次日绕过确认条件。
     fast_series = close.rolling(params["fast_window"]).mean()
     slow_series = close.rolling(params["slow_window"]).mean()
-    ma_cross_up = bool(
-        len(history) >= 2
-        and fast_series.iloc[-1] > slow_series.iloc[-1]
-        and fast_series.iloc[-2] <= slow_series.iloc[-2]
+    cross_up_series = (
+        (fast_series > slow_series)
+        & (fast_series.shift(1) <= slow_series.shift(1))
     )
-    adx_value = float(
-        _adx_series(
-            history["adj_high"].astype(float),
-            history["adj_low"].astype(float),
-            close,
-            int(params.get("adx_window", 14)),
-        ).iloc[-1]
+    ma_cross_up = bool(cross_up_series.iloc[-1])
+    cross_valid_days = max(int(params.get("cross_valid_days", 3)), 1)
+    recent_cross_window = cross_up_series.tail(cross_valid_days)
+    recent_cross_positions = np.flatnonzero(
+        recent_cross_window.fillna(False).to_numpy()
     )
+    days_since_cross: int | None = None
+    cross_volume_ratio = 0.0
+    if len(recent_cross_positions):
+        days_since_cross = len(recent_cross_window) - 1 - int(recent_cross_positions[-1])
+        cross_index = len(history) - 1 - days_since_cross
+        prior_average_volume = float(volume.iloc[max(0, cross_index - 20) : cross_index].mean())
+        if prior_average_volume > 0:
+            cross_volume_ratio = float(volume.iloc[cross_index]) / prior_average_volume
+
+    adx_series, plus_di_series, minus_di_series = _directional_series(
+        history["adj_high"].astype(float),
+        history["adj_low"].astype(float),
+        close,
+        int(params.get("adx_window", 14)),
+    )
+    below_slow = (fast_series <= slow_series).fillna(False)
+    below_slow_days = 0
+    for value in reversed(below_slow.tolist()):
+        if not value:
+            break
+        below_slow_days += 1
     return {
         "raw_close": float(last["close"]),
         "adj_close": float(last["adj_close"]),
@@ -550,8 +628,13 @@ def _feature_row(
         "volatility": max(volatility, 0.05),
         "average_amount": average_amount,
         "volume_ratio": volume_ratio,
-        "adx": adx_value,
+        "adx": float(adx_series.iloc[-1]),
+        "plus_di": float(plus_di_series.iloc[-1]),
+        "minus_di": float(minus_di_series.iloc[-1]),
         "ma_cross_up": ma_cross_up,
+        "days_since_cross": days_since_cross,
+        "cross_volume_ratio": cross_volume_ratio,
+        "below_slow_days": below_slow_days,
     }
 
 
@@ -559,6 +642,22 @@ def _rank(series: pd.Series) -> pd.Series:
     if len(series) <= 1:
         return pd.Series(0.5, index=series.index)
     return series.rank(method="average", pct=True)
+
+
+def _trading_days_since(
+    frame: pd.DataFrame,
+    earlier_date: str | date | pd.Timestamp,
+    trade_date: pd.Timestamp,
+) -> int:
+    """Count available trading rows after an earlier date through trade_date."""
+    dates = _date_values(frame)
+    earlier = np.datetime64(pd.Timestamp(earlier_date).normalize(), "ns")
+    current = np.datetime64(trade_date.normalize(), "ns")
+    earlier_index = int(np.searchsorted(dates, earlier, side="right")) - 1
+    current_index = int(np.searchsorted(dates, current, side="right")) - 1
+    if earlier_index < 0 or current_index < 0:
+        return 0
+    return max(current_index - earlier_index, 0)
 
 
 def _allocate_capped_weights(
@@ -621,6 +720,7 @@ def _analyze(
     strategy_id: str,
     market_context: dict[str, Any] | None = None,
     position_sizing_equity: float | None = None,
+    last_exit_dates: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     feature_rows: list[dict[str, Any]] = []
     for symbol, frame in frames.items():
@@ -720,25 +820,61 @@ def _analyze(
             + volume_rank * 0.05
             + external_rank * 0.15
         )
-        # 震荡市过滤：持续多头排列正常持有；刚金叉的标的必须同时满足
-        # ADX 趋势强度达标 + 当日放量确认，否则视为震荡市假金叉不进场。
-        # 只约束"进场日"，不约束已持仓，避免趋势中段 ADX 回落导致误清仓。
+        # 未持仓标的必须由最近一次有效金叉进入：金叉窗口、金叉日放量、
+        # ADX趋势强度和+DI方向缺一不可。持仓标的不重复验证入场条件，
+        # 只在确认死叉后退出，避免震荡区单日穿越造成反复交易。
         ma_bull = (
             (table["adj_close"] > table["slow_ma"])
             & (table["fast_ma"] > table["slow_ma"])
         )
-        cross_up = table["ma_cross_up"].fillna(False).astype(bool)
         adx_ok = (
             pd.to_numeric(table["adx"], errors="coerce").fillna(0.0)
             >= float(params.get("adx_min", 0))
         )
-        volume_ok = (
-            pd.to_numeric(table["volume_ratio"], errors="coerce").fillna(0.0)
+        direction_ok = (
+            pd.to_numeric(table["plus_di"], errors="coerce").fillna(0.0)
+            > pd.to_numeric(table["minus_di"], errors="coerce").fillna(0.0)
+        )
+        recent_cross_ok = (
+            pd.to_numeric(table["days_since_cross"], errors="coerce").notna()
+            & (
+                pd.to_numeric(table["days_since_cross"], errors="coerce")
+                < int(params.get("cross_valid_days", 3))
+            )
+        )
+        cross_volume_ok = (
+            pd.to_numeric(table["cross_volume_ratio"], errors="coerce").fillna(0.0)
             >= float(params.get("volume_confirm_ratio", 0))
         )
-        strategy_eligible = ma_bull & (
-            ~cross_up | (cross_up & adx_ok & volume_ok)
+        held = pd.Series(table.index.isin(positions), index=table.index)
+        death_cross_confirmed = (
+            (
+                table["fast_ma"]
+                <= table["slow_ma"]
+                * (1 - float(params.get("death_cross_buffer", 0.005)))
+            )
+            | (
+                pd.to_numeric(table["below_slow_days"], errors="coerce").fillna(0)
+                >= int(params.get("death_cross_confirm_days", 2))
+            )
         )
+        cooldown_days = max(int(params.get("reentry_cooldown_days", 5)), 0)
+        cooldown_ok = pd.Series(True, index=table.index, dtype=bool)
+        for symbol, exit_date in (last_exit_dates or {}).items():
+            if symbol in cooldown_ok.index and symbol in frames:
+                cooldown_ok.loc[symbol] = (
+                    _trading_days_since(frames[symbol], exit_date, trade_date)
+                    >= cooldown_days
+                )
+        entry_eligible = (
+            ma_bull
+            & recent_cross_ok
+            & cross_volume_ok
+            & adx_ok
+            & direction_ok
+            & cooldown_ok
+        )
+        strategy_eligible = (held & ~death_cross_confirmed) | (~held & entry_eligible)
     elif strategy_id == "momentum":
         table["score"] = (
             _rank(table["momentum_short"]) * 0.38
@@ -935,6 +1071,24 @@ def _analyze(
                 > float(etf_features[symbol]["slow_ma"])
                 and float(etf_features[symbol]["adj_close"])
                 > float(etf_features[symbol]["slow_ma"])
+                and float(etf_features[symbol]["adx"])
+                >= float(params.get("adx_min", 0))
+                and float(etf_features[symbol]["plus_di"])
+                > float(etf_features[symbol]["minus_di"])
+                and etf_features[symbol].get("days_since_cross") is not None
+                and int(etf_features[symbol]["days_since_cross"])
+                < int(params.get("cross_valid_days", 3))
+                and float(etf_features[symbol]["cross_volume_ratio"])
+                >= float(params.get("etf_volume_confirm_ratio", 1.2))
+                and (
+                    symbol not in (last_exit_dates or {})
+                    or _trading_days_since(
+                        frames[symbol],
+                        (last_exit_dates or {})[symbol],
+                        trade_date,
+                    )
+                    >= int(params.get("reentry_cooldown_days", 5))
+                )
             ]
             for symbol in etf_candidates:
                 if len(target_weights) >= params["max_positions"]:
@@ -995,10 +1149,10 @@ def _analyze(
                 stop_reason = f"持仓亏损 {position_return:.1%} 触发止损"
             elif (
                 strategy_id == "moving_average"
-                and float(feature["fast_ma"]) <= float(feature["slow_ma"])
+                and bool(death_cross_confirmed.loc[symbol])
             ):
                 hard_stop = True
-                stop_reason = "快均线跌破慢均线"
+                stop_reason = "快均线确认跌破慢均线"
             elif (
                 strategy_id == "momentum"
                 and (
@@ -1033,14 +1187,23 @@ def _analyze(
             elif symbol in etf_fallback_used:
                 reason = (
                     f"宽基ETF兜底：个股优选不足，用市场beta补足最低仓位"
-                    f"（{STRATEGY_NAMES[strategy_id]}趋势成立）"
+                    f"（{STRATEGY_NAMES[strategy_id]}趋势成立，"
+                    f"ADX {float(feature['adx']):.1f}，"
+                    f"金叉量比 {float(feature['cross_volume_ratio']):.2f}）"
                 )
             else:
                 score = float(feature["score"]) if feature is not None else 0.0
-                reason = (
-                    f"{STRATEGY_NAMES[strategy_id]}信号成立，"
-                    f"进入强势板块且个股综合分 {score:.2f}"
-                )
+                if strategy_id == "moving_average" and feature is not None:
+                    reason = (
+                        f"双均线有效金叉，ADX {float(feature['adx']):.1f}，"
+                        f"金叉量比 {float(feature['cross_volume_ratio']):.2f}，"
+                        f"个股综合分 {score:.2f}"
+                    )
+                else:
+                    reason = (
+                        f"{STRATEGY_NAMES[strategy_id]}信号成立，"
+                        f"进入强势板块且个股综合分 {score:.2f}"
+                    )
         else:
             continue
 
@@ -1264,6 +1427,9 @@ def _execute_pending(
             remaining = current_shares - quantity
             if remaining <= 0:
                 positions.pop(symbol, None)
+                account.setdefault("last_exit_dates", {})[symbol] = (
+                    trade_date.date().isoformat()
+                )
             else:
                 basis_before = float(
                     current.get(
@@ -1730,15 +1896,10 @@ def _process_dates(
     processed = 0
 
     for trade_date in dates:
-        params = {
-            **VERSION_LIBRARY[account["current_version"]],
-            "minimum_exposure": float(
-                account.get("configuration", {}).get(
-                    "minimum_invested_ratio",
-                    0.0,
-                )
-            ),
-        }
+        params = _effective_params(
+            VERSION_LIBRARY[account["current_version"]],
+            account.get("configuration", {}),
+        )
         due_plan = list(account.get("pending_plan", []))
         applied_actions = _apply_corporate_actions(
             account,
@@ -1781,6 +1942,7 @@ def _process_dates(
             equity,
             strategy_id,
             market_context,
+            last_exit_dates=account.get("last_exit_dates", {}),
         )
         plan = [
             {
@@ -1867,7 +2029,13 @@ def _evaluate_version(
     previous_closes: dict[str, float] = {}
     rebalances = 0
     total_turnover = 0.0
-    cost_rate = 0.0006
+    total_buy_turnover = 0.0
+    total_sell_turnover = 0.0
+    total_commission = 0.0
+    total_stamp_tax = 0.0
+    total_slippage = 0.0
+    last_exit_dates: dict[str, str] = {}
+    costs = PaperCosts()
 
     for trade_date in dates:
         current_closes: dict[str, float] = {}
@@ -1913,16 +2081,50 @@ def _evaluate_version(
             strategy_id,
             (market_context_by_date or {}).get(trade_date.normalize()),
             position_sizing_equity,
+            last_exit_dates,
         )
         new_weights = analysis["target_weights"]
-        turnover = sum(
-            abs(new_weights.get(symbol, 0) - weights.get(symbol, 0))
-            for symbol in set(weights) | set(new_weights)
+        symbols = set(weights) | set(new_weights)
+        buy_turnover = sum(
+            max(new_weights.get(symbol, 0) - weights.get(symbol, 0), 0.0)
+            for symbol in symbols
         )
+        sell_turnover = sum(
+            max(weights.get(symbol, 0) - new_weights.get(symbol, 0), 0.0)
+            for symbol in symbols
+        )
+        turnover = buy_turnover + sell_turnover
         if turnover > 0.05:
             rebalances += 1
         total_turnover += turnover
-        equity *= max(1 - turnover * cost_rate, 0.99)
+        total_buy_turnover += buy_turnover
+        total_sell_turnover += sell_turnover
+
+        # 与模拟成交统一：佣金双边0.03%且最低5元，股票卖出印花税
+        # 0.05%，双边滑点0.02%。按评估资金规模换算最低佣金影响。
+        nominal_equity = max(float(position_sizing_equity) * equity, 1.0)
+        daily_cost_fraction = 0.0
+        for symbol in symbols:
+            delta = new_weights.get(symbol, 0) - weights.get(symbol, 0)
+            if abs(delta) <= 1e-12:
+                continue
+            gross = abs(delta) * nominal_equity
+            commission = max(costs.minimum_commission, gross * costs.commission_rate)
+            slippage = gross * costs.slippage_bps / 10_000
+            stamp_tax = (
+                gross * costs.stamp_tax_rate
+                if delta < 0 and not is_etf(symbol)
+                else 0.0
+            )
+            total_commission += commission
+            total_slippage += slippage
+            total_stamp_tax += stamp_tax
+            daily_cost_fraction += (commission + slippage + stamp_tax) / nominal_equity
+        equity *= max(1 - daily_cost_fraction, 0.99)
+
+        for symbol in symbols:
+            if weights.get(symbol, 0) > 0 and new_weights.get(symbol, 0) <= 0:
+                last_exit_dates[symbol] = trade_date.date().isoformat()
         weights = new_weights
         previous_closes = current_closes
         equity_values.append(equity)
@@ -1943,6 +2145,24 @@ def _evaluate_version(
         "oos_calmar": round(out_of_sample["calmar"], 4),
         "rebalances": rebalances,
         "turnover": round(total_turnover, 4),
+        "annualized_turnover": round(
+            total_turnover * 252 / max(len(equity_dates), 1),
+            4,
+        ),
+        "buy_turnover": round(total_buy_turnover, 4),
+        "sell_turnover": round(total_sell_turnover, 4),
+        "estimated_commission": round(total_commission, 2),
+        "estimated_stamp_tax": round(total_stamp_tax, 2),
+        "estimated_slippage": round(total_slippage, 2),
+        "estimated_transaction_cost": round(
+            total_commission + total_stamp_tax + total_slippage,
+            2,
+        ),
+        "cost_to_initial_capital": round(
+            (total_commission + total_stamp_tax + total_slippage)
+            / max(float(position_sizing_equity), 1.0),
+            6,
+        ),
     }
 
 
@@ -1973,13 +2193,11 @@ def _automatic_upgrade(
     risk_profile = str(
         account.get("configuration", {}).get("risk_profile", "balanced")
     )
-    minimum_exposure = float(
-        account.get("configuration", {}).get("minimum_invested_ratio", 0.0)
-    )
+    configuration = account.get("configuration", {})
     for version, params in VERSION_LIBRARY.items():
         if params.get("risk_profile", "balanced") != risk_profile:
             continue
-        effective_params = {**params, "minimum_exposure": minimum_exposure}
+        effective_params = _effective_params(params, configuration)
         metrics = _evaluate_version(
             frames,
             industries,
@@ -2135,6 +2353,13 @@ def replay_paper_simulation(
         "strategy_name": STRATEGY_NAMES[request.strategy_id],
         "risk_profile": request.risk_profile,
         "minimum_invested_ratio": request.minimum_invested_ratio,
+        "adx_window": request.adx_window,
+        "adx_min": request.adx_min,
+        "volume_confirm_ratio": request.volume_confirm_ratio,
+        "cross_valid_days": request.cross_valid_days,
+        "death_cross_confirm_days": request.death_cross_confirm_days,
+        "death_cross_buffer": request.death_cross_buffer,
+        "reentry_cooldown_days": request.reentry_cooldown_days,
         "frequency": "1d",
         "universe_mode": request.universe_mode,
         "backtest_start_date": request.backtest_start_date.isoformat(),
@@ -2154,7 +2379,7 @@ def replay_paper_simulation(
         request.account_id,
         initial_version,
         "champion",
-        VERSION_LIBRARY[initial_version],
+        _effective_params(VERSION_LIBRARY[initial_version], configuration),
         {},
         "按账户风险档选择的初始可解释基线版本。",
     )

@@ -63,6 +63,13 @@ class PaperSimulationRequest(BaseModel):
     universe_mode: Literal["fixed", "full_market"] = "fixed"
     risk_profile: Literal["balanced", "aggressive"] = "balanced"
     minimum_invested_ratio: float = Field(default=0.0, ge=0.0, le=0.95)
+    adx_window: int = Field(default=14, ge=5, le=60)
+    adx_min: float = Field(default=20.0, ge=5.0, le=60.0)
+    volume_confirm_ratio: float = Field(default=1.5, ge=1.0, le=5.0)
+    cross_valid_days: int = Field(default=3, ge=1, le=20)
+    death_cross_confirm_days: int = Field(default=2, ge=1, le=10)
+    death_cross_buffer: float = Field(default=0.005, ge=0.0, le=0.05)
+    reentry_cooldown_days: int = Field(default=5, ge=0, le=60)
     symbols: list[str] = Field(default_factory=lambda: DEFAULT_MATRIX_SYMBOLS.copy())
     backtest_start_date: date = date(2024, 1, 1)
     backtest_end_date: date = date(2025, 12, 31)

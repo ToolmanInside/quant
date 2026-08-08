@@ -68,6 +68,13 @@ export type PaperDashboard = {
       universe_mode?: "fixed" | "full_market";
       risk_profile?: "balanced" | "aggressive";
       minimum_invested_ratio?: number;
+      adx_window?: number;
+      adx_min?: number;
+      volume_confirm_ratio?: number;
+      cross_valid_days?: number;
+      death_cross_confirm_days?: number;
+      death_cross_buffer?: number;
+      reentry_cooldown_days?: number;
       frequency?: "1d";
       backtest_start_date?: string;
       backtest_end_date?: string;
@@ -129,6 +136,10 @@ export type PaperDashboard = {
     metrics: {
       oos_sharpe?: number;
       oos_max_drawdown?: number;
+      turnover?: number;
+      annualized_turnover?: number;
+      estimated_transaction_cost?: number;
+      cost_to_initial_capital?: number;
     };
   }>;
   upgrade_events: Array<{
@@ -172,6 +183,13 @@ export type PaperForm = {
   universe_mode: "fixed" | "full_market";
   risk_profile: "balanced" | "aggressive";
   minimum_invested_ratio: number;
+  adx_window: number;
+  adx_min: number;
+  volume_confirm_ratio: number;
+  cross_valid_days: number;
+  death_cross_confirm_days: number;
+  death_cross_buffer: number;
+  reentry_cooldown_days: number;
   symbols: string;
   backtest_start_date: string;
   backtest_end_date: string;

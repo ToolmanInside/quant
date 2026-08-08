@@ -126,6 +126,96 @@ export function ConfigTab({ form, dashboard, busy, onChangeForm, onSubmit }: Pro
 
         <div className="config-section">
           <div className="config-section-head">
+            <span>震荡过滤 · 双均线策略</span>
+            <span className="config-badge">防反复交易</span>
+          </div>
+
+          <div className="config-grid-3">
+            <label>
+              ADX 周期
+              <input
+                type="number"
+                min={5}
+                max={60}
+                value={form.adx_window}
+                onChange={(e) => onChangeForm({ ...form, adx_window: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              ADX 入场下限
+              <input
+                type="number"
+                min={5}
+                max={60}
+                step={1}
+                value={form.adx_min}
+                onChange={(e) => onChangeForm({ ...form, adx_min: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              金叉日量比
+              <input
+                type="number"
+                min={1}
+                max={5}
+                step={0.1}
+                value={form.volume_confirm_ratio}
+                onChange={(e) => onChangeForm({ ...form, volume_confirm_ratio: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+
+          <div className="config-grid-3">
+            <label>
+              金叉有效窗口（交易日）
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={form.cross_valid_days}
+                onChange={(e) => onChangeForm({ ...form, cross_valid_days: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              死叉确认天数
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={form.death_cross_confirm_days}
+                onChange={(e) => onChangeForm({ ...form, death_cross_confirm_days: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              平仓后冷却（交易日）
+              <input
+                type="number"
+                min={0}
+                max={60}
+                value={form.reentry_cooldown_days}
+                onChange={(e) => onChangeForm({ ...form, reentry_cooldown_days: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+
+          <label>
+            深度死叉阈值（%）
+            <input
+              type="number"
+              min={0}
+              max={5}
+              step={0.1}
+              value={Number((form.death_cross_buffer * 100).toFixed(2))}
+              onChange={(e) => onChangeForm({ ...form, death_cross_buffer: Number(e.target.value) / 100 })}
+            />
+            <small className="field-hint">
+              默认0.5%；达到该幅度立即确认死叉，否则等待连续确认。
+            </small>
+          </label>
+        </div>
+
+        <div className="config-section">
+          <div className="config-section-head">
             <span>时间区间</span>
           </div>
 
@@ -213,6 +303,12 @@ export function ConfigTab({ form, dashboard, busy, onChangeForm, onSubmit }: Pro
                   {v.metrics.oos_max_drawdown === undefined
                     ? "待评估"
                     : ratio.format(v.metrics.oos_max_drawdown)}
+                  {v.metrics.annualized_turnover === undefined
+                    ? ""
+                    : ` · 年化换手 ${v.metrics.annualized_turnover.toFixed(2)}`}
+                  {v.metrics.estimated_transaction_cost === undefined
+                    ? ""
+                    : ` · 估算成本 ¥${v.metrics.estimated_transaction_cost.toFixed(2)}`}
                 </small>
               </div>
             ))}
