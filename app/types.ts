@@ -65,6 +65,7 @@ export type PaperDashboard = {
     configuration: {
       strategy_id?: "moving_average" | "momentum" | "breakout";
       strategy_name?: string;
+      universe_mode?: "fixed" | "full_market";
       risk_profile?: "balanced" | "aggressive";
       minimum_invested_ratio?: number;
       frequency?: "1d";
@@ -168,6 +169,7 @@ export type PaperDashboard = {
 export type PaperForm = {
   account_id: string;
   strategy_id: "moving_average" | "momentum" | "breakout";
+  universe_mode: "fixed" | "full_market";
   risk_profile: "balanced" | "aggressive";
   minimum_invested_ratio: number;
   symbols: string;

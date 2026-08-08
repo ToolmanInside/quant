@@ -20,17 +20,6 @@
       "price_strength": 0.1
     }
   },
-  "news_research": {
-    "enabled": true,
-    "provider": "bocha",
-    "api_key": "${BOCHA_API_KEY}",
-    "freshness": "oneWeek",
-    "results_per_query": 5,
-    "max_sectors": 3,
-    "max_stocks": 8,
-    "factor_weight": 0.05,
-    "timeout_seconds": 20
-  },
   "schedule": {
     "timezone": "Asia/Shanghai",
     "position_report_at": "12:00",

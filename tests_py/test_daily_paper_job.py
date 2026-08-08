@@ -258,7 +258,6 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
-    monkeypatch.setenv("BOCHA_API_KEY", "test-bocha-token")
     monkeypatch.setenv(
         "WECHAT_WEBHOOK_URL",
         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
@@ -273,9 +272,7 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     config = load_unified_config(Path("config/quant-config.json"))
 
     assert config.tushare_token == "test-token"
-    assert config.bocha_api_key == "test-bocha-token"
     assert config.market_universe.mode == "full_market"
-    assert config.news_research.enabled
     assert config.wechat_webhook_url.endswith("key=test")
     assert config.notification_provider == "feishu"
     assert config.feishu_webhook_url.endswith("/hook/test-hook")
@@ -289,8 +286,6 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.daily_close_at == "18:00"
     assert config.state_directory.as_posix() == ".quant-state/accounts"
     assert config.reinitialize_on_config_change
-
-
 def test_unified_config_rejects_string_boolean(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
     payload = json.loads(Path("config/quant-config.json").read_text(encoding="utf-8"))
@@ -308,7 +303,6 @@ def test_unified_config_rejects_string_boolean(tmp_path, monkeypatch) -> None:
 
 def test_unified_config_normalizes_symbols(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
-    monkeypatch.setenv("BOCHA_API_KEY", "test-bocha-token")
     monkeypatch.setenv(
         "WECHAT_WEBHOOK_URL",
         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
@@ -452,11 +446,8 @@ def test_full_market_catch_up_rebuilds_each_date_in_order(
         active_config,
         as_of_date,
         universe_config,
-        news_config,
-        bocha_api_key,
-        include_news=True,
     ):
-        research_calls.append((as_of_date, include_news))
+        research_calls.append((as_of_date, True))
         return active_config.symbols, {
             "mode": "full_market",
             "trade_date": as_of_date.isoformat(),
@@ -487,8 +478,8 @@ def test_full_market_catch_up_rebuilds_each_date_in_order(
 
     assert advance_calls == [date(2026, 7, day) for day in (29, 30, 31)]
     assert research_calls == [
-        (date(2026, 7, 29), False),
-        (date(2026, 7, 30), False),
+        (date(2026, 7, 29), True),
+        (date(2026, 7, 30), True),
         (date(2026, 7, 31), True),
     ]
     assert result["run"]["processed_days"] == 3

@@ -64,6 +64,22 @@ export function ConfigTab({ form, dashboard, busy, onChangeForm, onSubmit }: Pro
         </label>
 
         <label>
+          选股范围
+          <select
+            value={form.universe_mode}
+            onChange={(e) =>
+              onChangeForm({ ...form, universe_mode: e.target.value as PaperForm["universe_mode"] })
+            }
+          >
+            <option value="full_market">全市场扫描（每日重建候选池）</option>
+            <option value="fixed">固定池（仅上方输入的标的）</option>
+          </select>
+          <small className="field-hint">
+            全市场模式天数更分散；修改后需重新初始化账户。
+          </small>
+        </label>
+
+        <label>
           投资风险档
           <select
             value={form.risk_profile}

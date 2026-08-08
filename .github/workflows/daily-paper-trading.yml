@@ -45,7 +45,6 @@ jobs:
     timeout-minutes: 45
     env:
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-      BOCHA_API_KEY: ${{ secrets.BOCHA_API_KEY }}
       FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
       FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
       FEISHU_WEBHOOK_KEYWORD: ${{ secrets.FEISHU_WEBHOOK_KEYWORD }}

@@ -30,7 +30,6 @@ from backend.models import (
     PaperSimulationRequest,
     normalize_ts_code,
 )
-from backend.news_research import NewsResearchConfig, enrich_with_bocha_news
 from backend.paper_store import PaperStore
 from backend.paper_trading import advance_paper_simulation, replay_paper_simulation
 
@@ -80,9 +79,7 @@ class JobConfig:
 class UnifiedConfig:
     paper_account: JobConfig
     tushare_token: str
-    bocha_api_key: str
     market_universe: MarketUniverseConfig
-    news_research: NewsResearchConfig
     timezone: str
     position_report_at: str
     daily_close_at: str
@@ -212,27 +209,6 @@ def load_unified_config(path: Path) -> UnifiedConfig:
             str(name): float(value) for name, value in factor_weights.items()
         },
     )
-    news_payload = payload.get("news_research") or {}
-    news_enabled = _strict_bool(
-        news_payload.get("enabled"),
-        "news_research.enabled",
-        False,
-    )
-    news_research = NewsResearchConfig(
-        enabled=news_enabled,
-        freshness=str(news_payload.get("freshness", "oneWeek")),
-        results_per_query=max(
-            1,
-            min(int(news_payload.get("results_per_query", 5)), 10),
-        ),
-        max_sectors=max(0, min(int(news_payload.get("max_sectors", 3)), 10)),
-        max_stocks=max(0, min(int(news_payload.get("max_stocks", 8)), 20)),
-        factor_weight=max(
-            0.0,
-            min(float(news_payload.get("factor_weight", 0.05)), 0.10),
-        ),
-        timeout_seconds=max(1, int(news_payload.get("timeout_seconds", 20))),
-    )
     schedule = payload.get("schedule") or {}
     storage = payload.get("storage") or {}
     notification = payload.get("notification") or {}
@@ -323,13 +299,7 @@ def load_unified_config(path: Path) -> UnifiedConfig:
             market.get("tushare_token"),
             "market_data.tushare_token",
         ),
-        bocha_api_key=_resolve_environment_placeholder(
-            news_payload.get("api_key", ""),
-            "news_research.api_key",
-            required=news_enabled,
-        ),
         market_universe=market_universe,
-        news_research=news_research,
         timezone=timezone,
         position_report_at=position_report_at,
         daily_close_at=daily_close_at,
@@ -531,9 +501,7 @@ def _market_research_lines(dashboard: dict[str, Any]) -> list[str]:
             )
         )
     candidates = research.get("candidates") or []
-    visible_candidates = [
-        item for item in candidates if not item.get("excluded_by_news")
-    ][:5]
+    visible_candidates = candidates[:5]
     if visible_candidates:
         lines.append(
             "- 结构化因子候选："
@@ -551,16 +519,6 @@ def _market_research_lines(dashboard: dict[str, Any]) -> list[str]:
     )
     return lines
 
-
-def _news_research_lines(dashboard: dict[str, Any]) -> list[str]:
-    research = (
-        dashboard.get("market_research")
-        or dashboard.get("account", {}).get("market_research")
-        or {}
-    )
-    news = research.get("news") or {}
-    if not news.get("enabled"):
-        return ["- Bocha 新闻研究未启用；结构化因子与技术策略仍可独立运行。"]
 
     lines = [
         (
@@ -758,9 +716,6 @@ def build_markdown_report(
         "",
         "#### 全市场板块与选股研究",
         *_market_research_lines(dashboard),
-        "",
-        "#### 新闻与事件校验",
-        *_news_research_lines(dashboard),
         "",
         "#### 下一交易日计划",
         *_plan_lines(dashboard),
@@ -1104,9 +1059,6 @@ def _active_market_universe(
     config: JobConfig,
     as_of_date: date,
     universe_config: MarketUniverseConfig,
-    news_config: NewsResearchConfig,
-    bocha_api_key: str,
-    include_news: bool = True,
 ) -> tuple[list[str], dict[str, Any] | None]:
     if universe_config.mode != "full_market":
         return list(config.symbols), None
@@ -1121,24 +1073,9 @@ def _active_market_universe(
         )
     try:
         result = research_full_market(provider, as_of_date, universe_config)
-        if news_config.enabled and include_news:
-            result = enrich_with_bocha_news(
-                result,
-                bocha_api_key,
-                news_config,
-            )
-        elif news_config.enabled:
-            result.summary["news"] = {
-                "enabled": False,
-                "provider": "bocha",
-                "sectors": [],
-                "stocks": [],
-                "errors": ["历史补算日不回看后来新闻，避免未来信息泄漏"],
-            }
         selected = [
             item["symbol"]
             for item in result.summary["candidates"]
-            if not item.get("excluded_by_news", False)
         ][: universe_config.detailed_candidate_count]
         active = list(
             dict.fromkeys(
@@ -1169,13 +1106,7 @@ def _active_market_universe(
                 "全市场研究失败，本次仅使用配置中的固定候选池："
                 f"{type(exc).__name__}: {exc}"
             ],
-            "news": {
-                "enabled": news_config.enabled,
-                "provider": "bocha",
-                "sectors": [],
-                "stocks": [],
-                "errors": ["因全市场结构化数据失败，未执行新闻研究"],
-            },
+            
         }
 
 
@@ -1185,8 +1116,6 @@ def _advance_day_by_day(
     config: JobConfig,
     open_dates: list[date],
     universe_config: MarketUniverseConfig,
-    news_config: NewsResearchConfig,
-    bocha_api_key: str,
     *,
     message_template: str,
 ) -> tuple[dict[str, Any], list[str], JobConfig, dict[str, Any] | None]:
@@ -1210,9 +1139,6 @@ def _advance_day_by_day(
             config,
             replay_date,
             universe_config,
-            news_config,
-            bocha_api_key,
-            include_news=index == len(open_dates) - 1,
         )
         if (
             market_research_summary
@@ -1328,8 +1254,6 @@ def run_daily_job(
     force_reinitialize: bool = False,
     reinitialize_on_config_change: bool = True,
     market_universe: MarketUniverseConfig | None = None,
-    news_research: NewsResearchConfig | None = None,
-    bocha_api_key: str = "",
 ) -> dict[str, Any]:
     if as_of_date < config.simulation_start_date:
         raise ValueError(
@@ -1339,7 +1263,6 @@ def run_daily_job(
     universe_config = market_universe or MarketUniverseConfig(
         mode=config.universe_mode
     )
-    news_config = news_research or NewsResearchConfig(enabled=False)
     provider = TushareDataProvider(tushare_token)
 
     # 非交易日不做全市场扫描和模拟推进（节假日 / 周末）
@@ -1400,8 +1323,6 @@ def run_daily_job(
                 config,
                 as_of_date,
                 universe_config,
-                news_config,
-                bocha_api_key,
             )
         else:
             # Existing full-market accounts rebuild each missing date below.
@@ -1471,8 +1392,6 @@ def run_daily_job(
                         config,
                         open_dates,
                         universe_config,
-                        news_config,
-                        bocha_api_key,
                         message_template=(
                             "重建完成：回放模拟首日 + 逐日全市场截面扫描 "
                             "{researched_days} 天，共处理 {total_processed} 个交易日。"
@@ -1487,8 +1406,6 @@ def run_daily_job(
                             config,
                             as_of_date,
                             universe_config,
-                            news_config,
-                            bocha_api_key,
                         )
                     )
                     effective_config = replace(config, symbols=active_symbols)
@@ -1547,8 +1464,6 @@ def run_daily_job(
                     config,
                     open_dates,
                     universe_config,
-                    news_config,
-                    bocha_api_key,
                     message_template=(
                         "已逐日重建并处理 {total_processed} 个新交易日。"
                     ),
@@ -1562,8 +1477,6 @@ def run_daily_job(
                             config,
                             as_of_date,
                             universe_config,
-                            news_config,
-                            bocha_api_key,
                         )
                     )
                     effective_config = replace(config, symbols=active_symbols)
@@ -1702,8 +1615,6 @@ def main() -> int:
                     unified.reinitialize_on_config_change
                 ),
                 market_universe=unified.market_universe,
-                news_research=unified.news_research,
-                bocha_api_key=unified.bocha_api_key,
             )
             report = build_markdown_report(
                 dashboard,

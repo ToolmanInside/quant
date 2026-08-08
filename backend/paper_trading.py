@@ -10,11 +10,65 @@ import numpy as np
 import pandas as pd
 
 from backend.data.providers import TushareDataProvider
+from backend.market_research import MarketUniverseConfig, research_full_market
 from backend.models import PaperAdvanceRequest, PaperSimulationRequest, is_etf
 from backend.paper_store import PaperStore
 
 
 logger = logging.getLogger("uvicorn.error")
+
+
+def _full_market_universe_for_day(
+    provider: TushareDataProvider,
+    as_of_date: date,
+    universe_config: MarketUniverseConfig,
+    required_symbols: list[str],
+    fixed_fallback: list[str],
+) -> tuple[list[str], dict[str, Any]]:
+    """点对点全市场选股（轻量版，不含新闻）。
+
+    返回 (当日活跃候选池, 研究摘要)。失败时降级为固定池 + 持仓/挂单标的。
+    与 daily_paper_job._active_market_universe 的选股口径一致（轻量版，不含新闻），
+    """
+    try:
+        result = research_full_market(provider, as_of_date, universe_config)
+        selected = [
+            item["symbol"]
+            for item in result.summary["candidates"]
+        ][: universe_config.detailed_candidate_count]
+        active = list(
+            dict.fromkeys(
+                selected
+                + universe_config.always_include_symbols
+                + required_symbols
+            )
+        )
+        if len(active) < 5:
+            active = list(dict.fromkeys(active + fixed_fallback))
+        result.summary["active_symbols"] = active
+        result.summary["required_position_symbols"] = list(
+            dict.fromkeys(required_symbols)
+        )
+        return active, result.summary
+    except Exception as exc:  # noqa: BLE001 - 降级到固定池，保证不中断
+        logger.exception("全市场研究失败，降级使用固定候选池")
+        active = list(dict.fromkeys(fixed_fallback + required_symbols))
+        return active, {
+            "mode": "degraded_fixed_fallback",
+            "trade_date": as_of_date.isoformat(),
+            "market_count": 0,
+            "eligible_count": 0,
+            "detailed_candidate_count": len(fixed_fallback),
+            "top_sectors": [],
+            "candidates": [],
+            "factor_coverage": {},
+            "active_symbols": active,
+            "required_position_symbols": list(dict.fromkeys(required_symbols)),
+            "warnings": [
+                "全市场研究失败，本次仅使用固定候选池："
+                f"{type(exc).__name__}: {exc}"
+            ],
+        }
 
 
 def _metrics(equity: pd.Series) -> dict:
@@ -2044,6 +2098,58 @@ def replay_paper_simulation(
     account["pending_plan"] = []
     store.save_account(account)
 
+    if request.universe_mode == "full_market":
+        # 全市场回放：用固定池 replay 首个模拟日建立账户，
+        # 之后逐日全市场扫描推进到 simulation_end_date。
+        first_day = simulation_dates[0]
+        seed_processed = _process_dates(
+            store,
+            account,
+            frames,
+            industries,
+            [first_day],
+            len(errors),
+            request.strategy_id,
+            corporate_actions,
+        )
+        store.set_data_errors(errors)
+        account = store.account(request.account_id)
+        assert account is not None
+        advance_result = _advance_full_market(
+            PaperAdvanceRequest(
+                account_id=request.account_id,
+                symbols=request.symbols,
+                as_of_date=request.simulation_end_date,
+            ),
+            provider,
+            store,
+            account,
+            first_day.date(),
+            request.strategy_id,
+        )
+        advance_processed = int(
+            (advance_result.get("run") or {}).get("processed_days", 0)
+        )
+        processed = seed_processed + advance_processed
+        dashboard = store.dashboard(request.account_id)
+        if advance_result.get("market_research") is not None:
+            dashboard["market_research"] = advance_result["market_research"]
+        dashboard["run"] = {
+            "mode": "replay",
+            "processed_days": processed,
+            "backtest_days": len(backtest_dates),
+            "simulation_days": len(simulation_dates),
+            "data_errors": (advance_result.get("run") or {}).get(
+                "data_errors", errors
+            ),
+            "message": (
+                f"回测期评估 {len(backtest_dates)} 个交易日；"
+                f"模拟期全市场逐日推演 {processed} 个交易日。"
+            ),
+        }
+        logger.info("Paper replay (full_market) completed: %s days", processed)
+        return dashboard
+
     processed = _process_dates(
         store,
         account,
@@ -2068,6 +2174,139 @@ def replay_paper_simulation(
         ),
     }
     logger.info("Paper replay completed: %s days", processed)
+    return dashboard
+
+
+def _advance_full_market(
+    request: PaperAdvanceRequest,
+    provider: TushareDataProvider,
+    store: PaperStore,
+    account: dict[str, Any],
+    last_date: date,
+    strategy_id: str,
+) -> dict[str, Any]:
+    """全市场模式逐日推进：每个新交易日点对点重建候选池后处理一天。
+
+    与固定池不同，每天都用 research_full_market 扫描全市场选股（无新闻），
+    避免用今天的候选回看过去（前视偏差）。
+    """
+    universe_config = MarketUniverseConfig(mode="full_market")
+    open_dates = provider.fetch_open_dates(
+        last_date + timedelta(days=1),
+        request.as_of_date,
+    )
+    if not open_dates:
+        dashboard = store.dashboard(request.account_id)
+        dashboard["run"] = {
+            "mode": "advance",
+            "processed_days": 0,
+            "data_errors": [],
+            "message": "没有发现新的交易日数据，账户未重复执行。",
+        }
+        return dashboard
+
+    total_processed = 0
+    combined_errors: list[dict[str, str]] = []
+    latest_research: dict[str, Any] | None = None
+    # 单个信号窗口最长约 90 个交易日，留足节假日缓冲。
+    history_days = 240
+
+    for replay_date in open_dates:
+        account = store.account(request.account_id)
+        assert account is not None
+        current_last = date.fromisoformat(account["last_date"])
+
+        held_symbols = [
+            str(item["symbol"])
+            for item in store.positions(request.account_id)
+            if item.get("symbol")
+        ]
+        pending_symbols = [
+            str(item["symbol"])
+            for item in account.get("pending_plan", [])
+            if item.get("symbol")
+        ]
+        required = list(dict.fromkeys([*held_symbols, *pending_symbols]))
+
+        active_symbols, research = _full_market_universe_for_day(
+            provider,
+            replay_date,
+            universe_config,
+            required,
+            list(request.symbols),
+        )
+        # 收盘数据尚未发布：research 的实际交易日与目标日不一致则停止。
+        if (
+            research.get("mode") == "full_market"
+            and research.get("trade_date") != replay_date.isoformat()
+        ):
+            break
+        latest_research = research
+
+        frames, errors = _load_frames(
+            provider,
+            active_symbols,
+            replay_date - timedelta(days=history_days),
+            replay_date,
+        )
+        missing_held = [s for s in held_symbols if s not in frames]
+        if missing_held:
+            raise ValueError(
+                "以下持仓标的缺少行情，已停止本次更新以避免错误估值："
+                + ", ".join(missing_held)
+            )
+        corporate_actions, action_errors = _load_corporate_actions_for_universe(
+            provider,
+            active_symbols,
+            current_last + timedelta(days=1),
+            replay_date,
+        )
+        errors.extend(action_errors)
+        industries = provider.fetch_industries(list(frames))
+
+        # 把当日研究挂到账户上，供 _process_dates 内 _analyze 读取。
+        account["market_research"] = research
+        account["universe"] = active_symbols
+        store.save_account(account)
+        research_date = str(research.get("trade_date") or "")
+        if research_date:
+            store.attach_market_research(
+                request.account_id, research_date, research
+            )
+
+        dates = [
+            day
+            for day in _calendar(frames)
+            if day.date() > current_last and day.date() <= replay_date
+        ]
+        processed = _process_dates(
+            store,
+            account,
+            frames,
+            industries,
+            dates,
+            len(errors),
+            strategy_id,
+            corporate_actions,
+        )
+        total_processed += processed
+        combined_errors.extend(errors)
+
+    store.set_data_errors(combined_errors)
+    dashboard = store.dashboard(request.account_id)
+    if latest_research is not None:
+        dashboard["market_research"] = latest_research
+    dashboard["run"] = {
+        "mode": "advance",
+        "processed_days": total_processed,
+        "data_errors": combined_errors,
+        "point_in_time_research_days": len(open_dates),
+        "message": (
+            f"全市场逐日推演 {total_processed} 个新交易日。"
+            if total_processed
+            else "没有发现新的交易日数据，账户未重复执行。"
+        ),
+    }
     return dashboard
 
 
@@ -2097,20 +2336,19 @@ def advance_paper_simulation(
         "strategy_id",
         "moving_average",
     )
-    # Full-market catch-up rebuilds a point-in-time candidate set for every
-    # missing day and does not run automatic version promotion.  Loading the
-    # entire configured backtest period on each of those days is unnecessary:
-    # the largest live signal window is 90 sessions.  Keep a generous calendar
-    # buffer for holidays and suspensions.  Fixed-universe mode retains the full
-    # history because its champion/challenger evaluation needs it.
+
+    # Full-market branch: per-day universe rebuild + advance (no news).
     if universe_mode == "full_market":
-        history_start = last_date - timedelta(days=240)
-    else:
-        history_start = (
-            date.fromisoformat(configured_start)
-            if configured_start
-            else last_date - timedelta(days=180)
+        return _advance_full_market(
+            request, provider, store, account, last_date, strategy_id
         )
+
+    # Fixed-universe mode: load history for all symbols at once.
+    history_start = (
+        date.fromisoformat(configured_start)
+        if configured_start
+        else last_date - timedelta(days=180)
+    )
     held_symbols = [
         str(item["symbol"])
         for item in store.positions(request.account_id)

@@ -22,6 +22,7 @@ const DEFAULT_SYMBOLS =
 const DEFAULT_FORM: PaperForm = {
   account_id: "default",
   strategy_id: "moving_average",
+  universe_mode: "full_market",
   risk_profile: "balanced",
   minimum_invested_ratio: 0,
   symbols: DEFAULT_SYMBOLS,
@@ -55,6 +56,8 @@ export function PaperTrading() {
           initial_cash: value.account.initial_cash,
           strategy_id:
             value.account.configuration.strategy_id ?? current.strategy_id,
+          universe_mode:
+            value.account.configuration.universe_mode ?? current.universe_mode,
           risk_profile:
             value.account.configuration.risk_profile ?? current.risk_profile,
           minimum_invested_ratio:

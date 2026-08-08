@@ -73,6 +73,96 @@ class FakeProvider:
         }
 
 
+class FullMarketProvider(FakeProvider):
+    """FakeProvider + minimal full-market snapshot APIs.
+
+    快照只推荐 SYMBOLS[5]（不在请求池里），用来验证全市场模式确实按截面选股，
+    而不是局限于 request.symbols。
+    """
+
+    def __init__(self) -> None:
+        self.snapshot_calls: list[date] = []
+
+    def fetch_open_dates(self, start_date: date, end_date: date) -> list[date]:
+        frame = market_frame(0)
+        days = [
+            d
+            for d in frame["trade_date"].dt.date.tolist()
+            if start_date <= d <= end_date
+        ]
+        return sorted(days)
+
+    def fetch_market_snapshot(
+        self,
+        as_of_date: date,
+    ) -> tuple[date, pd.DataFrame, list[str]]:
+        self.snapshot_calls.append(as_of_date)
+        rows = []
+        for index, symbol in enumerate(SYMBOLS):
+            rows.append(
+                {
+                    "ts_code": symbol,
+                    "name": f"测试股票{index}",
+                    "trade_date": pd.Timestamp(as_of_date),
+                    "close": 10.0 + index,
+                    "amount": 5_000_000.0,  # 单位千元 → 50 亿元，过成交额门槛
+                    "list_date": "20100101",
+                    "pct_chg": 5.0 - index,  # SYMBOLS[0] 涨幅最高
+                    "industry": f"行业{index % 3}",
+                }
+            )
+        return as_of_date, pd.DataFrame(rows), []
+
+    def fetch_market_technical_breadth(
+        self,
+        trade_date: date,
+    ) -> dict[str, float | int | str]:
+        return {
+            "breadth_ma20": 0.6,
+            "breadth_ma60": 0.5,
+            "breadth_combined": 0.55,
+            "coverage": 0.9,
+            "source": "test_fixture",
+        }
+
+
+def test_full_market_advance_scans_beyond_requested_pool(tmp_path) -> None:
+    """全市场模式 advance 应调用截面快照，而非局限固定池。"""
+    store = PaperStore(tmp_path / "paper.txt")
+    store.reset_account(
+        "default",
+        100_000,
+        SYMBOLS[:5],
+        "v1.0-balanced",
+        {
+            "strategy_id": "moving_average",
+            "universe_mode": "full_market",
+            "backtest_start_date": "2024-01-01",
+        },
+    )
+    account = store.account("default")
+    assert account is not None
+    account["last_date"] = "2025-12-26"
+    store.save_account(account)
+
+    provider = FullMarketProvider()
+    result = advance_paper_simulation(
+        PaperAdvanceRequest(
+            account_id="default",
+            symbols=SYMBOLS[:5],
+            as_of_date=date(2025, 12, 31),
+        ),
+        provider,
+        store,
+    )
+
+    # 每个新交易日都做了一次全市场截面扫描
+    assert provider.snapshot_calls, "全市场模式必须调用 fetch_market_snapshot"
+    assert result["run"]["mode"] == "advance"
+    assert result["run"]["processed_days"] >= 1
+    store.close()
+
+
 def test_replay_creates_auditable_paper_account(tmp_path) -> None:
     store = PaperStore(tmp_path / "paper.txt")
     request = PaperSimulationRequest(
@@ -691,8 +781,8 @@ def test_advance_forces_existing_holdings_into_requested_universe(tmp_path) -> N
         "v1.0-balanced",
         {
             "strategy_id": "moving_average",
-            "universe_mode": "full_market",
-            "backtest_start_date": "2024-01-01",
+            "universe_mode": "fixed",
+            "backtest_start_date": "2025-05-03",
         },
     )
     account = store.account("default")
