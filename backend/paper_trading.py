@@ -627,14 +627,36 @@ def _analyze(
     table = pd.DataFrame(feature_rows).set_index("symbol")
     liquidity_rank = _rank(np.log1p(table["average_amount"]))
     volume_rank = _rank(table["volume_ratio"].clip(upper=3))
+
+    # 全市场截面因子分（如果可用）：让基本面进入评分
+    candidate_factor_scores: dict[str, float] = {}
+    market_candidates = (market_context or {}).get("candidates") or []
+    for candidate in market_candidates:
+        symbol = candidate.get("symbol")
+        score = candidate.get("factor_score")
+        if symbol and score is not None:
+            candidate_factor_scores[symbol] = float(score)
+
+    if candidate_factor_scores:
+        table["factor_external"] = table.index.map(
+            lambda s: candidate_factor_scores.get(s)
+        )
+        table["factor_external"] = table["factor_external"].fillna(
+            table["score"] if "score" in table else 0.5
+        )
+        external_rank = _rank(table["factor_external"])
+    else:
+        external_rank = pd.Series(0.5, index=table.index)
+
     if strategy_id == "moving_average":
         table["score"] = (
-            _rank(table["trend20"]) * 0.35
-            + _rank(table["fast_ma"] / table["slow_ma"] - 1) * 0.25
-            + _rank(table["momentum_short"]) * 0.15
-            + _rank(table["momentum_long"]) * 0.10
-            + liquidity_rank * 0.10
+            _rank(table["trend20"]) * 0.30
+            + _rank(table["fast_ma"] / table["slow_ma"] - 1) * 0.22
+            + _rank(table["momentum_short"]) * 0.12
+            + _rank(table["momentum_long"]) * 0.08
+            + liquidity_rank * 0.08
             + volume_rank * 0.05
+            + external_rank * 0.15
         )
         strategy_eligible = (
             (table["adj_close"] > table["slow_ma"])
@@ -642,11 +664,12 @@ def _analyze(
         )
     elif strategy_id == "momentum":
         table["score"] = (
-            _rank(table["momentum_short"]) * 0.45
-            + _rank(table["momentum_long"]) * 0.30
-            + _rank(table["trend20"]) * 0.10
-            + liquidity_rank * 0.10
+            _rank(table["momentum_short"]) * 0.38
+            + _rank(table["momentum_long"]) * 0.26
+            + _rank(table["trend20"]) * 0.08
+            + liquidity_rank * 0.08
             + volume_rank * 0.05
+            + external_rank * 0.15
         )
         strategy_eligible = (
             (table["momentum_short"] > 0)
@@ -655,11 +678,12 @@ def _analyze(
         )
     elif strategy_id == "breakout":
         table["score"] = (
-            _rank(table["breakout_ratio"]) * 0.50
-            + volume_rank * 0.15
-            + _rank(table["momentum_short"]) * 0.15
-            + _rank(table["trend20"]) * 0.10
-            + liquidity_rank * 0.10
+            _rank(table["breakout_ratio"]) * 0.42
+            + volume_rank * 0.12
+            + _rank(table["momentum_short"]) * 0.12
+            + _rank(table["trend20"]) * 0.08
+            + liquidity_rank * 0.08
+            + external_rank * 0.18
         )
         held = pd.Series(table.index.isin(positions), index=table.index)
         strategy_eligible = (
@@ -808,12 +832,11 @@ def _analyze(
 
     target_weights: dict[str, float] = {}
     if exposure > 0 and selected:
-        inverse_volatility = {
-            symbol: 1 / float(table.loc[symbol, "volatility"])
-            for symbol in selected
-        }
+        # 等权重分配：每只入选标的分配相同基础权重，
+        # 再经 _allocate_capped_weights 约束单票上限和最低整手。
+        equal_weights = {symbol: 1.0 for symbol in selected}
         target_weights = _allocate_capped_weights(
-            inverse_volatility,
+            equal_weights,
             exposure,
             params["max_position_weight"],
             minimum_weights,

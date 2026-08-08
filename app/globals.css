@@ -739,55 +739,56 @@ td small {
   text-align: center;
 }
 
-/* ===== Config Form ===== */
-.config-tab {
+/* ===== Config Tab — 单栏居中分组布局 ===== */
+.config-layout {
   display: grid;
-  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
-  gap: 22px;
-  align-items: start;
+  gap: 20px;
 }
 
 .config-form {
-  padding: 17px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  background: #f6f5ef;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
-.config-form-title {
+.config-section {
+  padding: 22px 24px;
+  border: 1px solid rgba(23, 36, 36, 0.10);
+  border-radius: 14px;
+  background: var(--panel);
+  margin-bottom: 16px;
+}
+
+.config-section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 15px;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
 }
 
-.config-form-title span,
-.config-form-title strong {
-  display: block;
+.config-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
-.config-form-title span {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.config-form-title strong {
-  margin-top: 4px;
-  font-size: 15px;
-}
-
-.config-badge {
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(13, 105, 95, 0.09);
-  color: var(--teal);
-  font-size: 9px;
-  font-weight: 800;
+.config-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
 .config-form label {
   display: block;
-  margin-bottom: 12px;
+  margin-bottom: 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--ink);
@@ -805,6 +806,7 @@ td small {
   background: white;
   font-size: 13px;
   font-weight: 400;
+  color: var(--ink);
 }
 
 .config-form textarea {
@@ -814,40 +816,46 @@ td small {
   resize: vertical;
 }
 
-.field-hint {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 500;
-  line-height: 1.5;
+.config-range {
+  margin-top: 6px !important;
+  padding: 0 !important;
+  border: none !important;
+  accent-color: var(--teal);
+  cursor: pointer;
 }
 
-.stage-label {
-  margin: 2px 0 8px;
-  padding-top: 7px;
-  border-top: 1px solid var(--line);
+.config-inline-value {
+  font-family: Georgia, serif;
+  font-weight: 500;
+  color: var(--teal);
+}
+
+.config-phase-label {
+  display: block;
+  margin-bottom: 8px;
   color: var(--teal);
   font-size: 10px;
   font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
-.field-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
+.config-date-group {
+  min-width: 0;
+}
+
+.config-actions {
+  text-align: center;
 }
 
 .primary-btn {
-  width: 100%;
-  margin-top: 8px;
-  padding: 13px 22px;
+  padding: 13px 28px;
   border: none;
   border-radius: 10px;
   background: var(--teal);
   color: white;
   font-size: 14px;
   font-weight: 800;
+  cursor: pointer;
 }
 
 .primary-btn:disabled {
@@ -855,32 +863,58 @@ td small {
   opacity: 0.55;
 }
 
-.secondary-btn {
-  width: 100%;
-  margin-top: 9px;
-  padding: 12px 18px;
-  border: 1px solid var(--teal);
-  border-radius: 10px;
-  background: transparent;
+.config-actions .primary-btn {
+  width: auto;
+  min-width: 280px;
+}
+
+/* ===== Config badge & hints ===== */
+.config-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(13, 105, 95, 0.09);
   color: var(--teal);
+  font-size: 9px;
   font-weight: 800;
 }
 
-.secondary-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
+.field-hint {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.45;
 }
 
 .config-warning {
-  margin: 9px 0 0;
+  margin: 10px 0 0;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.6;
 }
 
-/* ===== Config Upgrade Panel ===== */
-.config-upgrade {
-  min-width: 0;
+/* ===== Config Lab (策略版本) ===== */
+.config-lab {
+  max-width: 720px;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+  .config-grid-3 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .config-section {
+    padding: 18px 16px;
+  }
+
+  .config-grid-2,
+  .config-grid-3 {
+    grid-template-columns: 1fr;
+  }
 }
 
 .version-list {
