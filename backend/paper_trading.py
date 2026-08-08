@@ -150,6 +150,9 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "stop_loss": 0.08,
         "minimum_amount": 20_000_000,
         "minimum_score": 0.52,
+        "adx_window": 14,
+        "adx_min": 20,
+        "volume_confirm_ratio": 1.5,
     },
     "v1.1-defensive": {
         "name": "防守型趋势",
@@ -172,6 +175,9 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "stop_loss": 0.06,
         "minimum_amount": 30_000_000,
         "minimum_score": 0.58,
+        "adx_window": 14,
+        "adx_min": 20,
+        "volume_confirm_ratio": 1.5,
     },
     "v1.2-responsive": {
         "name": "灵敏型趋势",
@@ -194,6 +200,9 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "stop_loss": 0.07,
         "minimum_amount": 20_000_000,
         "minimum_score": 0.50,
+        "adx_window": 14,
+        "adx_min": 20,
+        "volume_confirm_ratio": 1.5,
     },
     "v1.0-aggressive": {
         "name": "进取型中短期趋势",
@@ -216,6 +225,9 @@ VERSION_LIBRARY: dict[str, dict[str, Any]] = {
         "stop_loss": 0.09,
         "minimum_amount": 20_000_000,
         "minimum_score": 0.48,
+        "adx_window": 14,
+        "adx_min": 20,
+        "volume_confirm_ratio": 1.5,
         "board_lot_price_buffer": 1.10,
     },
 }
@@ -435,6 +447,37 @@ def _last_row_on_or_before(
     return None if index < 0 else frame.iloc[index]
 
 
+def _adx_series(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    window: int = 14,
+) -> pd.Series:
+    """Wilder 平均趋向指数 ADX：衡量趋势强度，震荡市低、趋势市高。"""
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(
+        np.where((up_move > down_move) & (up_move > 0), up_move, 0.0),
+        index=high.index,
+    )
+    minus_dm = pd.Series(
+        np.where((down_move > up_move) & (down_move > 0), down_move, 0.0),
+        index=high.index,
+    )
+    tr = np.maximum(
+        high - low,
+        np.maximum(
+            (high - close.shift(1)).abs(),
+            (low - close.shift(1)).abs(),
+        ),
+    )
+    atr = tr.ewm(alpha=1 / window, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1 / window, adjust=False).mean() / atr
+    minus_di = 100 * minus_dm.ewm(alpha=1 / window, adjust=False).mean() / atr
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    return dx.ewm(alpha=1 / window, adjust=False).mean()
+
+
 def _feature_row(
     frame: pd.DataFrame,
     trade_date: pd.Timestamp,
@@ -451,6 +494,7 @@ def _feature_row(
         params["momentum_long"],
         params["breakout_window"],
         params.get("breakout_exit_window", 10),
+        params.get("adx_window", 14) + 5,
     )
     if len(history) <= maximum_window:
         return None
@@ -475,6 +519,22 @@ def _feature_row(
     volume_ratio = (
         float(last["volume"]) / average_volume if average_volume > 0 else 0.0
     )
+    # 金叉事件：昨日快线未上穿，今日上穿（用于"金叉日需ADX+放量确认"）。
+    fast_series = close.rolling(params["fast_window"]).mean()
+    slow_series = close.rolling(params["slow_window"]).mean()
+    ma_cross_up = bool(
+        len(history) >= 2
+        and fast_series.iloc[-1] > slow_series.iloc[-1]
+        and fast_series.iloc[-2] <= slow_series.iloc[-2]
+    )
+    adx_value = float(
+        _adx_series(
+            history["adj_high"].astype(float),
+            history["adj_low"].astype(float),
+            close,
+            int(params.get("adx_window", 14)),
+        ).iloc[-1]
+    )
     return {
         "raw_close": float(last["close"]),
         "adj_close": float(last["adj_close"]),
@@ -490,6 +550,8 @@ def _feature_row(
         "volatility": max(volatility, 0.05),
         "average_amount": average_amount,
         "volume_ratio": volume_ratio,
+        "adx": adx_value,
+        "ma_cross_up": ma_cross_up,
     }
 
 
@@ -658,9 +720,24 @@ def _analyze(
             + volume_rank * 0.05
             + external_rank * 0.15
         )
-        strategy_eligible = (
+        # 震荡市过滤：持续多头排列正常持有；刚金叉的标的必须同时满足
+        # ADX 趋势强度达标 + 当日放量确认，否则视为震荡市假金叉不进场。
+        # 只约束"进场日"，不约束已持仓，避免趋势中段 ADX 回落导致误清仓。
+        ma_bull = (
             (table["adj_close"] > table["slow_ma"])
             & (table["fast_ma"] > table["slow_ma"])
+        )
+        cross_up = table["ma_cross_up"].fillna(False).astype(bool)
+        adx_ok = (
+            pd.to_numeric(table["adx"], errors="coerce").fillna(0.0)
+            >= float(params.get("adx_min", 0))
+        )
+        volume_ok = (
+            pd.to_numeric(table["volume_ratio"], errors="coerce").fillna(0.0)
+            >= float(params.get("volume_confirm_ratio", 0))
+        )
+        strategy_eligible = ma_bull & (
+            ~cross_up | (cross_up & adx_ok & volume_ok)
         )
     elif strategy_id == "momentum":
         table["score"] = (

@@ -11,10 +11,11 @@ from backend.paper_trading import (
     RISK_PROFILE_INITIAL_VERSION,
     VERSION_LIBRARY,
     _allocate_capped_weights,
-    _apply_corporate_actions,
     _analyze,
+    _apply_corporate_actions,
     _execute_pending,
     _evaluate_version,
+    _feature_row,
     advance_paper_simulation,
     replay_paper_simulation,
 )
@@ -52,6 +53,57 @@ def market_frame(symbol_index: int) -> pd.DataFrame:
             "amount": close * (8_000_000 + symbol_index * 1_000_000),
         }
     )
+
+
+def ma_cross_frame(
+    *,
+    cross_today: bool,
+    cross_day_volume_ratio: float = 1.0,
+) -> pd.DataFrame:
+    """构造"震荡后启动趋势"的日线：100天震荡 + 70天单边趋势。
+
+    cross_today=True 时最后一根 K 线恰为 5/20 金叉日（可控制当日量比）；
+    cross_today=False 时最后一根为金叉后 15 天（持续多头、非金叉日）。
+    """
+    osc_days, trend_days = 100, 70
+    n = osc_days + trend_days
+    index = np.arange(n, dtype=float)
+    osc = np.sin(index / 4.0) * 1.0 + np.sin(index / 11.0) * 0.5
+    trend = (index - osc_days) * 0.20 + np.sin(index / 20.0) * 0.10
+    close = np.where(index < osc_days, 10 + osc, 10 + trend)
+    dates = pd.bdate_range("2025-01-01", periods=n)
+    fast = pd.Series(close).rolling(5).mean()
+    slow = pd.Series(close).rolling(20).mean()
+    cross_up = np.where(
+        (fast > slow)
+        & (fast.shift(1) <= slow.shift(1))
+        & (index > osc_days + 2)
+    )[0]
+    assert len(cross_up) > 0, "构造数据应产生趋势段金叉"
+    cross_idx = int(cross_up[0])
+    end = cross_idx + 1 if cross_today else min(cross_idx + 15, n)
+
+    frame = pd.DataFrame(
+        {
+            "trade_date": dates[:end],
+            "open": close[:end],
+            "high": close[:end] * 1.01 + 0.05,
+            "low": close[:end] * 0.99 - 0.05,
+            "close": close[:end],
+            "adj_open": close[:end],
+            "adj_high": close[:end] * 1.01 + 0.05,
+            "adj_low": close[:end] * 0.99 - 0.05,
+            "adj_close": close[:end],
+        }
+    )
+    base_volume = 8_000_000
+    frame["volume"] = base_volume
+    if cross_today:
+        frame.loc[frame.index[-1], "volume"] = int(
+            base_volume * cross_day_volume_ratio
+        )
+    frame["amount"] = frame["close"] * frame["volume"]
+    return frame
 
 
 class FakeProvider:
@@ -493,6 +545,63 @@ def test_candidate_pool_etf_still_participates_in_stock_selection() -> None:
 
     assert "159611.SZ" in result["features"]
     assert result["etf_fallback_used"] == []
+
+
+def test_feature_row_reports_adx_and_golden_cross() -> None:
+    params = VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]]
+
+    # 金叉日：ma_cross_up=True，趋势启动 ADX 应达到阈值
+    cross_frame = ma_cross_frame(cross_today=True, cross_day_volume_ratio=1.0)
+    feature = _feature_row(
+        cross_frame,
+        pd.Timestamp(cross_frame["trade_date"].iloc[-1]),
+        params,
+    )
+    assert feature is not None
+    assert feature["ma_cross_up"] is True
+    assert feature["adx"] >= float(params["adx_min"])
+
+    # 金叉 15 天后：持续多头，非金叉日，ADX 仍高
+    held_frame = ma_cross_frame(cross_today=False)
+    feature_held = _feature_row(
+        held_frame,
+        pd.Timestamp(held_frame["trade_date"].iloc[-1]),
+        params,
+    )
+    assert feature_held is not None
+    assert feature_held["ma_cross_up"] is False
+    assert feature_held["adx"] >= float(params["adx_min"])
+
+
+def test_ma_golden_cross_requires_volume_confirmation() -> None:
+    """金叉日必须放量（量比≥volume_confirm_ratio）才允许进场。"""
+    params = VERSION_LIBRARY[RISK_PROFILE_INITIAL_VERSION["aggressive"]]
+    target = SYMBOLS[0]
+    others = SYMBOLS[1:5]
+
+    def run_analysis(target_frame: pd.DataFrame) -> set[str]:
+        frames = {symbol: ma_cross_frame(cross_today=False) for symbol in others}
+        frames[target] = target_frame
+        trade_date = pd.Timestamp(target_frame["trade_date"].iloc[-1])
+        result = _analyze(
+            trade_date,
+            frames,
+            FakeProvider().fetch_industries(SYMBOLS[:5]),
+            params,
+            {},
+            100_000,
+            "moving_average",
+            {"technical_breadth": {"composite": 0.90, "coverage": 0.95}},
+        )
+        return set(result["selected_symbols"])
+
+    # 金叉日缩量（量比 1.0 < 1.5）→ 视为震荡假金叉，不进场
+    low_volume = ma_cross_frame(cross_today=True, cross_day_volume_ratio=1.0)
+    assert target not in run_analysis(low_volume)
+
+    # 金叉日放量（量比 2.0 ≥ 1.5）→ 确认有效，进场
+    high_volume = ma_cross_frame(cross_today=True, cross_day_volume_ratio=2.0)
+    assert target in run_analysis(high_volume)
 
 
 def test_analysis_skips_symbols_whose_board_lot_exceeds_position_cap() -> None:
