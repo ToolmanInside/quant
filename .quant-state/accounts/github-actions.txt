@@ -6,7 +6,7 @@
     "cash": 12874.024406740007,
     "peak_equity": 111624.02440674,
     "current_version": "v1.0-aggressive",
-    "last_date": "2026-08-10",
+    "last_date": "2026-08-11",
     "last_exit_dates": {
       "688186.SH": "2026-08-05",
       "600459.SH": "2026-08-07",
@@ -14,62 +14,98 @@
     },
     "pending_plan": [
       {
-        "symbol": "300285.SZ",
-        "name": "国瓷材料",
-        "sector": "电子",
-        "action": "BUY",
-        "target_weight": 0.2375,
-        "reason": "趋势保持且当前仓位低于目标，模拟加仓",
-        "signal_price": 76.11,
-        "score": 0.7172,
+        "symbol": "000751.SZ",
+        "name": "锌业股份",
+        "sector": "有色金属",
+        "action": "CLOSE",
+        "target_weight": 0.0,
+        "reason": "退出板块/个股优选名单",
+        "signal_price": 5.14,
+        "score": 0.5611,
         "strategy_version": "v1.0-aggressive",
-        "signal_date": "2026-08-10"
+        "signal_date": "2026-08-11"
+      },
+      {
+        "symbol": "300149.SZ",
+        "name": "睿智医药",
+        "sector": "医药生物",
+        "action": "BUY",
+        "target_weight": 0.192639,
+        "reason": "双均线有效金叉，ADX 20.6，金叉量比 1.50，个股综合分 0.80",
+        "signal_price": 11.07,
+        "score": 0.7973,
+        "strategy_version": "v1.0-aggressive",
+        "signal_date": "2026-08-11"
+      },
+      {
+        "symbol": "601858.SH",
+        "name": "中国科传",
+        "sector": "传媒",
+        "action": "SELL",
+        "target_weight": 0.181298,
+        "reason": "仍保留趋势，但仓位高于风险目标",
+        "signal_price": 24.58,
+        "score": 0.7496,
+        "strategy_version": "v1.0-aggressive",
+        "signal_date": "2026-08-11"
+      },
+      {
+        "symbol": "688428.SH",
+        "name": "诺诚健华",
+        "sector": "医药生物",
+        "action": "BUY",
+        "target_weight": 0.213468,
+        "reason": "双均线有效金叉，ADX 22.1，金叉量比 2.02，个股综合分 0.64",
+        "signal_price": 31.4,
+        "score": 0.6407,
+        "strategy_version": "v1.0-aggressive",
+        "signal_date": "2026-08-11"
       }
     ],
     "universe": [
-      "601199.SH",
-      "601069.SH",
-      "000685.SZ",
-      "002155.SZ",
-      "605337.SH",
-      "002237.SZ",
-      "002086.SZ",
-      "601015.SH",
-      "601020.SH",
-      "600419.SH",
-      "605388.SH",
-      "002385.SZ",
-      "002548.SZ",
-      "300898.SZ",
-      "001337.SZ",
-      "600988.SH",
-      "603363.SH",
-      "000876.SZ",
-      "600547.SH",
-      "002329.SZ",
-      "002114.SZ",
-      "002758.SZ",
-      "601011.SH",
-      "600531.SH",
-      "600338.SH",
-      "600961.SH",
-      "600299.SH",
-      "920786.BJ",
-      "920970.BJ",
-      "002999.SZ",
-      "000426.SZ",
-      "300094.SZ",
-      "600008.SH",
-      "000798.SZ",
-      "600740.SH",
-      "600408.SH",
-      "003039.SZ",
-      "600461.SH",
-      "000598.SZ",
-      "600792.SH",
+      "000661.SZ",
+      "600938.SH",
+      "688336.SH",
+      "002251.SZ",
+      "603001.SH",
+      "000026.SZ",
+      "002612.SZ",
+      "300979.SZ",
+      "600867.SH",
+      "603619.SH",
+      "688278.SH",
+      "300357.SZ",
+      "000983.SZ",
+      "002832.SZ",
+      "301047.SZ",
+      "601116.SH",
+      "600350.SH",
+      "300005.SZ",
+      "600188.SH",
+      "000968.SZ",
+      "601699.SH",
+      "600256.SH",
+      "601857.SH",
+      "601225.SH",
+      "920165.BJ",
+      "600368.SH",
+      "603393.SH",
+      "600012.SH",
+      "601001.SH",
+      "301717.SZ",
+      "600377.SH",
+      "601088.SH",
+      "001256.SZ",
+      "000429.SZ",
+      "600827.SH",
+      "601933.SH",
+      "688828.SH",
+      "002444.SZ",
+      "002611.SZ",
+      "600269.SH",
       "000751.SZ",
       "300285.SZ",
-      "300788.SZ",
+      "600961.SH",
       "601858.SH"
     ],
     "configuration": {
@@ -92,12 +128,12 @@
       "simulation_end_date": "2026-07-30"
     },
     "created_at": "2026-08-10T11:11:17",
-    "updated_at": "2026-08-10T11:13:06",
+    "updated_at": "2026-08-11T10:53:52",
     "market_research": {
       "mode": "full_market",
-      "trade_date": "2026-08-10",
-      "market_count": 5538,
-      "eligible_count": 4134,
+      "trade_date": "2026-08-11",
+      "market_count": 5539,
+      "eligible_count": 3867,
       "detailed_candidate_count": 40,
       "factor_weights": {
         "valuation": 0.2,
@@ -108,779 +144,778 @@
         "price_strength": 0.1
       },
       "factor_coverage": {
-        "valuation": 0.9988,
-        "quality": 0.0,
+        "valuation": 0.9987,
+        "quality": 0.9995,
         "turnover": 1.0,
         "fund_flow": 1.0
       },
-      "market_breadth": 0.7054,
+      "market_breadth": 0.3251,
       "top_sectors": [
         {
-          "name": "黄金",
-          "score": 0.6445,
+          "name": "未分类",
+          "score": 0.6276,
           "breadth": 1.0,
-          "net_flow_ratio": 0.062913,
-          "quality": 0.5,
-          "members": 10
-        },
-        {
-          "name": "水务",
-          "score": 0.5866,
-          "breadth": 1.0,
-          "net_flow_ratio": 0.105945,
-          "quality": 0.5,
-          "members": 7
-        },
-        {
-          "name": "乳制品",
-          "score": 0.5859,
-          "breadth": 1.0,
-          "net_flow_ratio": 0.066508,
-          "quality": 0.5,
-          "members": 18
-        },
-        {
-          "name": "饲料",
-          "score": 0.5848,
-          "breadth": 1.0,
-          "net_flow_ratio": 0.092696,
-          "quality": 0.5,
-          "members": 19
-        },
-        {
-          "name": "焦炭加工",
-          "score": 0.5819,
-          "breadth": 1.0,
-          "net_flow_ratio": 0.102508,
-          "quality": 0.5,
-          "members": 7
-        },
-        {
-          "name": "批发业",
-          "score": 0.5805,
-          "breadth": 1.0,
-          "net_flow_ratio": 0.196948,
-          "quality": 0.5,
+          "net_flow_ratio": 0.052663,
+          "quality": 0.6667,
           "members": 3
         },
         {
-          "name": "渔业",
-          "score": 0.58,
-          "breadth": 1.0,
-          "net_flow_ratio": 0.150046,
-          "quality": 0.5,
-          "members": 5
+          "name": "超市连锁",
+          "score": 0.6054,
+          "breadth": 0.8571,
+          "net_flow_ratio": 0.020943,
+          "quality": 0.5389,
+          "members": 7
         },
         {
-          "name": "铅锌",
-          "score": 0.579,
-          "breadth": 0.8462,
-          "net_flow_ratio": 0.00565,
-          "quality": 0.5,
-          "members": 13
+          "name": "路桥",
+          "score": 0.5994,
+          "breadth": 0.4444,
+          "net_flow_ratio": -0.060306,
+          "quality": 0.6914,
+          "members": 9
+        },
+        {
+          "name": "生物制药",
+          "score": 0.5944,
+          "breadth": 0.6667,
+          "net_flow_ratio": -0.011598,
+          "quality": 0.6151,
+          "members": 69
+        },
+        {
+          "name": "轻工机械",
+          "score": 0.5838,
+          "breadth": 0.3333,
+          "net_flow_ratio": -0.038679,
+          "quality": 0.658,
+          "members": 3
+        },
+        {
+          "name": "石油开采",
+          "score": 0.5834,
+          "breadth": 0.75,
+          "net_flow_ratio": -0.009453,
+          "quality": 0.4625,
+          "members": 20
+        },
+        {
+          "name": "服饰",
+          "score": 0.5825,
+          "breadth": 0.625,
+          "net_flow_ratio": -0.028188,
+          "quality": 0.623,
+          "members": 32
+        },
+        {
+          "name": "煤炭开采",
+          "score": 0.5804,
+          "breadth": 0.5,
+          "net_flow_ratio": -0.011107,
+          "quality": 0.4808,
+          "members": 24
         }
       ],
       "candidates": [
         {
-          "symbol": "601199.SH",
-          "name": "江南水务",
-          "sector": "水务",
-          "factor_score": 0.7575,
-          "pct_chg": 9.9819,
-          "net_flow_ratio": 0.160779,
+          "symbol": "000661.SZ",
+          "name": "长春高新",
+          "sector": "生物制药",
+          "factor_score": 0.8268,
+          "pct_chg": 4.5783,
+          "net_flow_ratio": 0.116668,
           "factors": {
-            "valuation": 0.8777,
-            "quality": 0.5,
-            "turnover": 0.9291,
-            "fund_flow": 0.9484,
-            "liquidity": 0.5895,
-            "price_strength": 0.6896
+            "valuation": 0.6512,
+            "quality": 0.7644,
+            "turnover": 0.8662,
+            "fund_flow": 0.9285,
+            "liquidity": 0.9496,
+            "price_strength": 0.9491
           }
         },
         {
-          "symbol": "601069.SH",
-          "name": "西部黄金",
-          "sector": "黄金",
-          "factor_score": 0.7036,
-          "pct_chg": 6.2083,
-          "net_flow_ratio": 0.07766,
+          "symbol": "600938.SH",
+          "name": "中国海油",
+          "sector": "石油开采",
+          "factor_score": 0.8044,
+          "pct_chg": 5.3125,
+          "net_flow_ratio": 0.076213,
           "factors": {
-            "valuation": 0.4559,
-            "quality": 0.5,
-            "turnover": 0.9179,
-            "fund_flow": 0.8154,
-            "liquidity": 0.9228,
-            "price_strength": 0.9434
+            "valuation": 0.8264,
+            "quality": 0.7505,
+            "turnover": 0.4718,
+            "fund_flow": 0.9445,
+            "liquidity": 0.9578,
+            "price_strength": 0.9604
           }
         },
         {
-          "symbol": "000685.SZ",
-          "name": "中山公用",
-          "sector": "水务",
-          "factor_score": 0.6987,
-          "pct_chg": 1.9928,
-          "net_flow_ratio": 0.222185,
+          "symbol": "688336.SH",
+          "name": "三生国健",
+          "sector": "生物制药",
+          "factor_score": 0.7806,
+          "pct_chg": 2.9443,
+          "net_flow_ratio": 0.04137,
           "factors": {
-            "valuation": 0.9664,
-            "quality": 0.5,
-            "turnover": 0.5171,
-            "fund_flow": 0.8913,
-            "liquidity": 0.5844,
-            "price_strength": 0.6618
+            "valuation": 0.5859,
+            "quality": 0.7391,
+            "turnover": 0.8816,
+            "fund_flow": 0.8559,
+            "liquidity": 0.8399,
+            "price_strength": 0.9118
           }
         },
         {
-          "symbol": "002155.SZ",
-          "name": "湖南黄金",
-          "sector": "黄金",
-          "factor_score": 0.6946,
-          "pct_chg": 5.0427,
-          "net_flow_ratio": 0.076974,
+          "symbol": "002251.SZ",
+          "name": "步步高",
+          "sector": "超市连锁",
+          "factor_score": 0.7695,
+          "pct_chg": 3.7333,
+          "net_flow_ratio": 0.171431,
           "factors": {
-            "valuation": 0.4944,
-            "quality": 0.5,
-            "turnover": 0.8239,
-            "fund_flow": 0.7991,
-            "liquidity": 0.955,
-            "price_strength": 0.9175
+            "valuation": 0.5787,
+            "quality": 0.605,
+            "turnover": 0.9271,
+            "fund_flow": 0.926,
+            "liquidity": 0.8492,
+            "price_strength": 0.9328
           }
         },
         {
-          "symbol": "605337.SH",
-          "name": "李子园",
-          "sector": "乳制品",
-          "factor_score": 0.6898,
-          "pct_chg": 4.7518,
-          "net_flow_ratio": 0.072926,
+          "symbol": "603001.SH",
+          "name": "奥康国际",
+          "sector": "服饰",
+          "factor_score": 0.7642,
+          "pct_chg": 3.7992,
+          "net_flow_ratio": 0.111905,
           "factors": {
-            "valuation": 0.6964,
-            "quality": 0.5,
+            "valuation": 0.6863,
+            "quality": 0.6874,
+            "turnover": 0.8652,
+            "fund_flow": 0.9508,
+            "liquidity": 0.4166,
+            "price_strength": 0.9346
+          }
+        },
+        {
+          "symbol": "000026.SZ",
+          "name": "飞亚达",
+          "sector": "服饰",
+          "factor_score": 0.7531,
+          "pct_chg": 5.0341,
+          "net_flow_ratio": 0.041859,
+          "factors": {
+            "valuation": 0.4784,
+            "quality": 0.6889,
+            "turnover": 0.9245,
+            "fund_flow": 0.8702,
+            "liquidity": 0.7675,
+            "price_strength": 0.9568
+          }
+        },
+        {
+          "symbol": "002612.SZ",
+          "name": "朗姿股份",
+          "sector": "服饰",
+          "factor_score": 0.7447,
+          "pct_chg": 0.8358,
+          "net_flow_ratio": 0.030381,
+          "factors": {
+            "valuation": 0.8168,
+            "quality": 0.5523,
             "turnover": 0.8712,
-            "fund_flow": 0.8192,
-            "liquidity": 0.4008,
-            "price_strength": 0.9093
+            "fund_flow": 0.8275,
+            "liquidity": 0.6791,
+            "price_strength": 0.7913
           }
         },
         {
-          "symbol": "002237.SZ",
-          "name": "恒邦股份",
-          "sector": "黄金",
-          "factor_score": 0.6892,
-          "pct_chg": 3.3684,
-          "net_flow_ratio": 0.105889,
+          "symbol": "300979.SZ",
+          "name": "华利集团",
+          "sector": "服饰",
+          "factor_score": 0.7366,
+          "pct_chg": 5.8341,
+          "net_flow_ratio": 0.140416,
           "factors": {
-            "valuation": 0.7058,
-            "quality": 0.5,
-            "turnover": 0.6455,
-            "fund_flow": 0.8166,
-            "liquidity": 0.7958,
-            "price_strength": 0.8333
+            "valuation": 0.7366,
+            "quality": 0.6433,
+            "turnover": 0.5685,
+            "fund_flow": 0.9568,
+            "liquidity": 0.5518,
+            "price_strength": 0.9664
           }
         },
         {
-          "symbol": "002086.SZ",
-          "name": "东方海洋",
-          "sector": "渔业",
-          "factor_score": 0.6884,
-          "pct_chg": 7.4468,
-          "net_flow_ratio": 0.3,
+          "symbol": "600867.SH",
+          "name": "通化东宝",
+          "sector": "生物制药",
+          "factor_score": 0.7341,
+          "pct_chg": 0.8353,
+          "net_flow_ratio": -0.00823,
           "factors": {
-            "valuation": 0.4823,
-            "quality": 0.5,
-            "turnover": 0.8117,
-            "fund_flow": 0.9663,
-            "liquidity": 0.56,
-            "price_strength": 0.9594
+            "valuation": 0.7815,
+            "quality": 0.8151,
+            "turnover": 0.637,
+            "fund_flow": 0.6389,
+            "liquidity": 0.7161,
+            "price_strength": 0.7908
           }
         },
         {
-          "symbol": "601015.SH",
-          "name": "陕西黑猫",
-          "sector": "焦炭加工",
-          "factor_score": 0.684,
-          "pct_chg": 2.6946,
-          "net_flow_ratio": 0.133954,
+          "symbol": "603619.SH",
+          "name": "中曼石油",
+          "sector": "石油开采",
+          "factor_score": 0.7307,
+          "pct_chg": 1.5666,
+          "net_flow_ratio": 0.024657,
           "factors": {
-            "valuation": 0.6612,
-            "quality": 0.5,
-            "turnover": 0.7892,
-            "fund_flow": 0.8608,
-            "liquidity": 0.5943,
-            "price_strength": 0.768
+            "valuation": 0.6013,
+            "quality": 0.5122,
+            "turnover": 0.9174,
+            "fund_flow": 0.8454,
+            "liquidity": 0.9022,
+            "price_strength": 0.8549
           }
         },
         {
-          "symbol": "601020.SH",
-          "name": "华钰矿业",
-          "sector": "铅锌",
-          "factor_score": 0.6833,
-          "pct_chg": 10.0236,
-          "net_flow_ratio": 0.090469,
+          "symbol": "688278.SH",
+          "name": "特宝生物",
+          "sector": "生物制药",
+          "factor_score": 0.7293,
+          "pct_chg": 3.5977,
+          "net_flow_ratio": 0.097224,
           "factors": {
-            "valuation": 0.5283,
-            "quality": 0.5,
-            "turnover": 0.8132,
-            "fund_flow": 0.8636,
-            "liquidity": 0.8897,
-            "price_strength": 0.6896
+            "valuation": 0.4537,
+            "quality": 0.8869,
+            "turnover": 0.6175,
+            "fund_flow": 0.8043,
+            "liquidity": 0.7024,
+            "price_strength": 0.931
           }
         },
         {
-          "symbol": "600419.SH",
-          "name": "天润乳业",
-          "sector": "乳制品",
-          "factor_score": 0.6697,
-          "pct_chg": 4.7953,
-          "net_flow_ratio": 0.083831,
+          "symbol": "300357.SZ",
+          "name": "我武生物",
+          "sector": "生物制药",
+          "factor_score": 0.724,
+          "pct_chg": 1.5194,
+          "net_flow_ratio": 0.04758,
           "factors": {
-            "valuation": 0.8501,
-            "quality": 0.5,
-            "turnover": 0.6984,
-            "fund_flow": 0.7371,
-            "liquidity": 0.3145,
-            "price_strength": 0.9107
+            "valuation": 0.4594,
+            "quality": 0.8437,
+            "turnover": 0.7231,
+            "fund_flow": 0.7821,
+            "liquidity": 0.7124,
+            "price_strength": 0.8508
           }
         },
         {
-          "symbol": "605388.SH",
-          "name": "均瑶健康",
-          "sector": "乳制品",
-          "factor_score": 0.6653,
-          "pct_chg": 5.0847,
-          "net_flow_ratio": 0.046769,
+          "symbol": "000983.SZ",
+          "name": "山西焦煤",
+          "sector": "煤炭开采",
+          "factor_score": 0.7184,
+          "pct_chg": 1.4771,
+          "net_flow_ratio": 0.047907,
           "factors": {
-            "valuation": 0.5486,
-            "quality": 0.5,
-            "turnover": 0.8664,
-            "fund_flow": 0.7615,
-            "liquidity": 0.5646,
-            "price_strength": 0.9182
+            "valuation": 0.7926,
+            "quality": 0.6031,
+            "turnover": 0.4774,
+            "fund_flow": 0.8836,
+            "liquidity": 0.7603,
+            "price_strength": 0.8474
           }
         },
         {
-          "symbol": "002385.SZ",
-          "name": "大北农",
-          "sector": "饲料",
-          "factor_score": 0.665,
-          "pct_chg": 3.3445,
-          "net_flow_ratio": 0.3,
+          "symbol": "002832.SZ",
+          "name": "比音勒芬",
+          "sector": "服饰",
+          "factor_score": 0.7157,
+          "pct_chg": 1.3122,
+          "net_flow_ratio": 0.036404,
           "factors": {
-            "valuation": 0.6204,
-            "quality": 0.5,
-            "turnover": 0.4693,
-            "fund_flow": 0.9891,
-            "liquidity": 0.6459,
-            "price_strength": 0.8309
+            "valuation": 0.6515,
+            "quality": 0.7819,
+            "turnover": 0.6344,
+            "fund_flow": 0.6911,
+            "liquidity": 0.7365,
+            "price_strength": 0.8293
           }
         },
         {
-          "symbol": "002548.SZ",
-          "name": "金新农",
-          "sector": "饲料",
-          "factor_score": 0.6633,
-          "pct_chg": 5.8228,
-          "net_flow_ratio": 0.254541,
+          "symbol": "301047.SZ",
+          "name": "义翘神州",
+          "sector": "生物制药",
+          "factor_score": 0.7132,
+          "pct_chg": 4.7267,
+          "net_flow_ratio": 0.01944,
           "factors": {
-            "valuation": 0.468,
-            "quality": 0.5,
-            "turnover": 0.8033,
-            "fund_flow": 0.9211,
-            "liquidity": 0.4627,
-            "price_strength": 0.9366
+            "valuation": 0.4194,
+            "quality": 0.7399,
+            "turnover": 0.6049,
+            "fund_flow": 0.8273,
+            "liquidity": 0.9289,
+            "price_strength": 0.9522
           }
         },
         {
-          "symbol": "300898.SZ",
-          "name": "熊猫乳品",
-          "sector": "乳制品",
-          "factor_score": 0.6611,
-          "pct_chg": 4.501,
-          "net_flow_ratio": 0.123415,
+          "symbol": "601116.SH",
+          "name": "三江购物",
+          "sector": "超市连锁",
+          "factor_score": 0.7127,
+          "pct_chg": 1.8657,
+          "net_flow_ratio": 0.048473,
           "factors": {
-            "valuation": 0.6505,
-            "quality": 0.5,
-            "turnover": 0.8626,
-            "fund_flow": 0.7163,
-            "liquidity": 0.4332,
-            "price_strength": 0.9001
+            "valuation": 0.6833,
+            "quality": 0.5947,
+            "turnover": 0.7835,
+            "fund_flow": 0.8915,
+            "liquidity": 0.444,
+            "price_strength": 0.8715
           }
         },
         {
-          "symbol": "001337.SZ",
-          "name": "四川黄金",
-          "sector": "黄金",
-          "factor_score": 0.6508,
-          "pct_chg": 7.557,
-          "net_flow_ratio": 0.012987,
+          "symbol": "600350.SH",
+          "name": "山东高速",
+          "sector": "路桥",
+          "factor_score": 0.7022,
+          "pct_chg": 1.4953,
+          "net_flow_ratio": 0.15622,
           "factors": {
-            "valuation": 0.3422,
-            "quality": 0.5,
-            "turnover": 0.9379,
-            "fund_flow": 0.6387,
-            "liquidity": 0.9291,
-            "price_strength": 0.9603
+            "valuation": 0.821,
+            "quality": 0.6405,
+            "turnover": 0.4658,
+            "fund_flow": 0.8582,
+            "liquidity": 0.5146,
+            "price_strength": 0.8487
           }
         },
         {
-          "symbol": "600988.SH",
-          "name": "赤峰黄金",
-          "sector": "黄金",
-          "factor_score": 0.6482,
-          "pct_chg": 3.8964,
-          "net_flow_ratio": 0.111218,
+          "symbol": "300005.SZ",
+          "name": "探路者",
+          "sector": "服饰",
+          "factor_score": 0.6974,
+          "pct_chg": 4.7016,
+          "net_flow_ratio": 0.083474,
           "factors": {
-            "valuation": 0.4759,
-            "quality": 0.5,
-            "turnover": 0.6499,
+            "valuation": 0.2534,
+            "quality": 0.7057,
+            "turnover": 0.7247,
+            "fund_flow": 0.9303,
+            "liquidity": 0.8035,
+            "price_strength": 0.9516
+          }
+        },
+        {
+          "symbol": "600188.SH",
+          "name": "兖矿能源",
+          "sector": "煤炭开采",
+          "factor_score": 0.6881,
+          "pct_chg": 1.4692,
+          "net_flow_ratio": 0.017025,
+          "factors": {
+            "valuation": 0.636,
+            "quality": 0.5355,
+            "turnover": 0.6273,
+            "fund_flow": 0.779,
+            "liquidity": 0.9258,
+            "price_strength": 0.8461
+          }
+        },
+        {
+          "symbol": "000968.SZ",
+          "name": "蓝焰控股",
+          "sector": "石油开采",
+          "factor_score": 0.6834,
+          "pct_chg": 0.2766,
+          "net_flow_ratio": -0.026743,
+          "factors": {
+            "valuation": 0.8285,
+            "quality": 0.7125,
+            "turnover": 0.7925,
+            "fund_flow": 0.4573,
+            "liquidity": 0.5772,
+            "price_strength": 0.7155
+          }
+        },
+        {
+          "symbol": "601699.SH",
+          "name": "潞安环能",
+          "sector": "煤炭开采",
+          "factor_score": 0.6819,
+          "pct_chg": -0.0614,
+          "net_flow_ratio": 0.019948,
+          "factors": {
+            "valuation": 0.7279,
+            "quality": 0.6679,
+            "turnover": 0.511,
             "fund_flow": 0.7314,
-            "liquidity": 0.9724,
-            "price_strength": 0.8703
+            "liquidity": 0.8141,
+            "price_strength": 0.6501
           }
         },
         {
-          "symbol": "603363.SH",
-          "name": "傲农生物",
-          "sector": "饲料",
-          "factor_score": 0.6475,
-          "pct_chg": 4.2403,
-          "net_flow_ratio": 0.169363,
+          "symbol": "600256.SH",
+          "name": "广汇能源",
+          "sector": "石油开采",
+          "factor_score": 0.6636,
+          "pct_chg": 1.3817,
+          "net_flow_ratio": 0.116678,
           "factors": {
-            "valuation": 0.5299,
-            "quality": 0.5,
-            "turnover": 0.6388,
-            "fund_flow": 0.8881,
-            "liquidity": 0.5416,
-            "price_strength": 0.8892
+            "valuation": 0.6697,
+            "quality": 0.3688,
+            "turnover": 0.5278,
+            "fund_flow": 0.9485,
+            "liquidity": 0.8479,
+            "price_strength": 0.8384
           }
         },
         {
-          "symbol": "000876.SZ",
-          "name": "新希望",
-          "sector": "饲料",
-          "factor_score": 0.6473,
-          "pct_chg": 3.3237,
-          "net_flow_ratio": 0.3,
+          "symbol": "601857.SH",
+          "name": "中国石油",
+          "sector": "石油开采",
+          "factor_score": 0.6617,
+          "pct_chg": 1.9355,
+          "net_flow_ratio": -0.065452,
           "factors": {
-            "valuation": 0.6306,
-            "quality": 0.5,
-            "turnover": 0.4435,
-            "fund_flow": 0.8848,
-            "liquidity": 0.6986,
-            "price_strength": 0.8287
+            "valuation": 0.9049,
+            "quality": 0.5715,
+            "turnover": 0.2463,
+            "fund_flow": 0.6074,
+            "liquidity": 0.9178,
+            "price_strength": 0.8764
           }
         },
         {
-          "symbol": "600547.SH",
-          "name": "山东黄金",
-          "sector": "黄金",
-          "factor_score": 0.6454,
-          "pct_chg": 3.248,
-          "net_flow_ratio": 0.045467,
+          "symbol": "601225.SH",
+          "name": "陕西煤业",
+          "sector": "煤炭开采",
+          "factor_score": 0.6612,
+          "pct_chg": -0.4224,
+          "net_flow_ratio": 0.003606,
           "factors": {
-            "valuation": 0.4842,
-            "quality": 0.5,
-            "turnover": 0.6829,
-            "fund_flow": 0.711,
-            "liquidity": 0.9666,
-            "price_strength": 0.8222
+            "valuation": 0.7434,
+            "quality": 0.7192,
+            "turnover": 0.2356,
+            "fund_flow": 0.7551,
+            "liquidity": 0.8891,
+            "price_strength": 0.5741
           }
         },
         {
-          "symbol": "002329.SZ",
-          "name": "皇氏集团",
-          "sector": "乳制品",
-          "factor_score": 0.6409,
-          "pct_chg": 10.1587,
-          "net_flow_ratio": 0.105237,
-          "factors": {
-            "valuation": 0.3539,
-            "quality": 0.5,
-            "turnover": 0.9003,
-            "fund_flow": 0.8862,
-            "liquidity": 0.6386,
-            "price_strength": 0.6896
-          }
-        },
-        {
-          "symbol": "002114.SZ",
-          "name": "罗平锌电",
-          "sector": "铅锌",
-          "factor_score": 0.6409,
-          "pct_chg": 6.0942,
-          "net_flow_ratio": 0.165936,
-          "factors": {
-            "valuation": 0.4587,
-            "quality": 0.5,
-            "turnover": 0.7667,
-            "fund_flow": 0.9073,
-            "liquidity": 0.3348,
-            "price_strength": 0.9417
-          }
-        },
-        {
-          "symbol": "002758.SZ",
-          "name": "浙农股份",
-          "sector": "批发业",
-          "factor_score": 0.6295,
-          "pct_chg": 2.3136,
-          "net_flow_ratio": 0.3,
-          "factors": {
-            "valuation": 0.9718,
-            "quality": 0.5,
-            "turnover": 0.4773,
-            "fund_flow": 0.7716,
-            "liquidity": 0.1241,
-            "price_strength": 0.7187
-          }
-        },
-        {
-          "symbol": "601011.SH",
-          "name": "宝泰隆",
-          "sector": "焦炭加工",
-          "factor_score": 0.6289,
-          "pct_chg": 3.4221,
-          "net_flow_ratio": 0.190083,
-          "factors": {
-            "valuation": 0.7171,
-            "quality": 0.5,
-            "turnover": 0.4732,
-            "fund_flow": 0.8619,
-            "liquidity": 0.3331,
-            "price_strength": 0.8385
-          }
-        },
-        {
-          "symbol": "600531.SH",
-          "name": "豫光金铅",
-          "sector": "铅锌",
-          "factor_score": 0.6284,
-          "pct_chg": 2.3564,
-          "net_flow_ratio": -0.019148,
-          "factors": {
-            "valuation": 0.7135,
-            "quality": 0.5,
-            "turnover": 0.7832,
-            "fund_flow": 0.4152,
-            "liquidity": 0.8766,
-            "price_strength": 0.7247
-          }
-        },
-        {
-          "symbol": "600338.SH",
-          "name": "西藏珠峰",
-          "sector": "铅锌",
-          "factor_score": 0.6257,
-          "pct_chg": 3.1609,
-          "net_flow_ratio": 0.003548,
-          "factors": {
-            "valuation": 0.6233,
-            "quality": 0.5,
-            "turnover": 0.6786,
-            "fund_flow": 0.55,
-            "liquidity": 0.8295,
-            "price_strength": 0.8125
-          }
-        },
-        {
-          "symbol": "600961.SH",
-          "name": "株冶集团",
-          "sector": "铅锌",
-          "factor_score": 0.6256,
-          "pct_chg": 2.619,
-          "net_flow_ratio": 0.006256,
-          "factors": {
-            "valuation": 0.5202,
-            "quality": 0.5,
-            "turnover": 0.9029,
-            "fund_flow": 0.4453,
-            "liquidity": 0.9623,
-            "price_strength": 0.7586
-          }
-        },
-        {
-          "symbol": "600299.SH",
-          "name": "安迪苏",
-          "sector": "饲料",
-          "factor_score": 0.6193,
-          "pct_chg": 1.5385,
-          "net_flow_ratio": -0.006868,
-          "factors": {
-            "valuation": 0.7731,
-            "quality": 0.5,
-            "turnover": 0.7567,
-            "fund_flow": 0.458,
-            "liquidity": 0.7627,
-            "price_strength": 0.5836
-          }
-        },
-        {
-          "symbol": "920786.BJ",
-          "name": "骑士乳业",
-          "sector": "乳制品",
-          "factor_score": 0.6151,
-          "pct_chg": 3.4632,
+          "symbol": "920165.BJ",
+          "name": "920165.BJ",
+          "sector": "未分类",
+          "factor_score": 0.6581,
+          "pct_chg": 138.5254,
           "net_flow_ratio": 0.0,
           "factors": {
-            "valuation": 0.681,
-            "quality": 0.5,
-            "turnover": 0.8837,
-            "fund_flow": 0.5174,
-            "liquidity": 0.3365,
-            "price_strength": 0.8422
+            "valuation": 0.441,
+            "quality": 0.8232,
+            "turnover": 0.5273,
+            "fund_flow": 0.7219,
+            "liquidity": 0.7127,
+            "price_strength": 0.6934
           }
         },
         {
-          "symbol": "920970.BJ",
-          "name": "大禹生物",
-          "sector": "饲料",
-          "factor_score": 0.614,
-          "pct_chg": 8.1395,
-          "net_flow_ratio": 0.0,
+          "symbol": "600368.SH",
+          "name": "五洲交通",
+          "sector": "路桥",
+          "factor_score": 0.6538,
+          "pct_chg": -1.9656,
+          "net_flow_ratio": -0.001816,
           "factors": {
-            "valuation": 0.4973,
-            "quality": 0.5,
-            "turnover": 0.9859,
-            "fund_flow": 0.6267,
-            "liquidity": 0.1991,
-            "price_strength": 0.9644
+            "valuation": 0.951,
+            "quality": 0.7535,
+            "turnover": 0.4802,
+            "fund_flow": 0.787,
+            "liquidity": 0.2527,
+            "price_strength": 0.2051
           }
         },
         {
-          "symbol": "002999.SZ",
-          "name": "天禾股份",
-          "sector": "批发业",
-          "factor_score": 0.6066,
-          "pct_chg": 3.5211,
-          "net_flow_ratio": 0.193999,
+          "symbol": "603393.SH",
+          "name": "新天然气",
+          "sector": "石油开采",
+          "factor_score": 0.6509,
+          "pct_chg": -1.5489,
+          "net_flow_ratio": -0.062302,
           "factors": {
-            "valuation": 0.6637,
-            "quality": 0.5,
-            "turnover": 0.6143,
-            "fund_flow": 0.8386,
-            "liquidity": 0.0435,
-            "price_strength": 0.8466
+            "valuation": 0.856,
+            "quality": 0.659,
+            "turnover": 0.6992,
+            "fund_flow": 0.5821,
+            "liquidity": 0.6568,
+            "price_strength": 0.2793
           }
         },
         {
-          "symbol": "000426.SZ",
-          "name": "兴业银锡",
-          "sector": "铅锌",
-          "factor_score": 0.6048,
-          "pct_chg": 3.0142,
-          "net_flow_ratio": -0.012187,
+          "symbol": "600012.SH",
+          "name": "皖通高速",
+          "sector": "路桥",
+          "factor_score": 0.6495,
+          "pct_chg": 1.1957,
+          "net_flow_ratio": 0.069789,
           "factors": {
-            "valuation": 0.43,
-            "quality": 0.5,
-            "turnover": 0.6974,
-            "fund_flow": 0.5566,
-            "liquidity": 0.9768,
-            "price_strength": 0.8021
+            "valuation": 0.7928,
+            "quality": 0.6424,
+            "turnover": 0.4886,
+            "fund_flow": 0.6822,
+            "liquidity": 0.3822,
+            "price_strength": 0.8236
           }
         },
         {
-          "symbol": "300094.SZ",
-          "name": "国联水产",
-          "sector": "渔业",
-          "factor_score": 0.6,
-          "pct_chg": 3.9286,
-          "net_flow_ratio": 0.108551,
+          "symbol": "601001.SH",
+          "name": "晋控煤业",
+          "sector": "煤炭开采",
+          "factor_score": 0.6482,
+          "pct_chg": -2.9444,
+          "net_flow_ratio": -0.023098,
           "factors": {
-            "valuation": 0.2568,
-            "quality": 0.5,
-            "turnover": 0.8186,
-            "fund_flow": 0.8147,
-            "liquidity": 0.5056,
-            "price_strength": 0.8732
+            "valuation": 0.8307,
+            "quality": 0.7153,
+            "turnover": 0.5205,
+            "fund_flow": 0.6936,
+            "liquidity": 0.7634,
+            "price_strength": 0.1011
           }
         },
         {
-          "symbol": "600008.SH",
-          "name": "首创环保",
-          "sector": "水务",
-          "factor_score": 0.5968,
-          "pct_chg": 0.7042,
-          "net_flow_ratio": 0.132088,
+          "symbol": "301717.SZ",
+          "name": "301717.SZ",
+          "sector": "未分类",
+          "factor_score": 0.6455,
+          "pct_chg": 662.2367,
+          "net_flow_ratio": 0.104874,
           "factors": {
-            "valuation": 0.9364,
-            "quality": 0.5,
-            "turnover": 0.0986,
-            "fund_flow": 0.9024,
-            "liquidity": 0.4744,
-            "price_strength": 0.4182
+            "valuation": 0.0494,
+            "quality": 0.7733,
+            "turnover": 0.5273,
+            "fund_flow": 0.974,
+            "liquidity": 0.9909,
+            "price_strength": 0.6934
           }
         },
         {
-          "symbol": "000798.SZ",
-          "name": "中水渔业",
-          "sector": "渔业",
-          "factor_score": 0.5927,
-          "pct_chg": 4.461,
-          "net_flow_ratio": 0.144124,
+          "symbol": "600377.SH",
+          "name": "宁沪高速",
+          "sector": "路桥",
+          "factor_score": 0.6452,
+          "pct_chg": 0.8354,
+          "net_flow_ratio": 0.143483,
           "factors": {
-            "valuation": 0.328,
-            "quality": 0.5,
-            "turnover": 0.7853,
-            "fund_flow": 0.8348,
-            "liquidity": 0.2753,
-            "price_strength": 0.8986
+            "valuation": 0.8887,
+            "quality": 0.6184,
+            "turnover": 0.1362,
+            "fund_flow": 0.948,
+            "liquidity": 0.2371,
+            "price_strength": 0.7911
           }
         },
         {
-          "symbol": "600740.SH",
-          "name": "山西焦化",
-          "sector": "焦炭加工",
-          "factor_score": 0.5783,
-          "pct_chg": 1.6949,
-          "net_flow_ratio": 0.113144,
+          "symbol": "601088.SH",
+          "name": "中国神华",
+          "sector": "煤炭开采",
+          "factor_score": 0.6401,
+          "pct_chg": 0.0448,
+          "net_flow_ratio": -0.019171,
           "factors": {
-            "valuation": 0.6708,
-            "quality": 0.5,
-            "turnover": 0.412,
-            "fund_flow": 0.7986,
-            "liquidity": 0.3633,
-            "price_strength": 0.6125
+            "valuation": 0.7616,
+            "quality": 0.7236,
+            "turnover": 0.1374,
+            "fund_flow": 0.6513,
+            "liquidity": 0.8831,
+            "price_strength": 0.6773
           }
         },
         {
-          "symbol": "600408.SH",
-          "name": "安泰集团",
-          "sector": "焦炭加工",
-          "factor_score": 0.5745,
-          "pct_chg": 3.2847,
-          "net_flow_ratio": 0.091985,
+          "symbol": "001256.SZ",
+          "name": "炜冈科技",
+          "sector": "轻工机械",
+          "factor_score": 0.6394,
+          "pct_chg": -1.2594,
+          "net_flow_ratio": 0.010389,
           "factors": {
-            "valuation": 0.5439,
-            "quality": 0.5,
-            "turnover": 0.6695,
-            "fund_flow": 0.5888,
-            "liquidity": 0.4003,
-            "price_strength": 0.8254
+            "valuation": 0.6036,
+            "quality": 0.8206,
+            "turnover": 0.7627,
+            "fund_flow": 0.6456,
+            "liquidity": 0.3558,
+            "price_strength": 0.3439
           }
         },
         {
-          "symbol": "003039.SZ",
-          "name": "顺控发展",
-          "sector": "水务",
-          "factor_score": 0.573,
-          "pct_chg": 3.2203,
-          "net_flow_ratio": 0.055526,
+          "symbol": "000429.SZ",
+          "name": "粤高速A",
+          "sector": "路桥",
+          "factor_score": 0.635,
+          "pct_chg": 0.3019,
+          "net_flow_ratio": 0.052958,
           "factors": {
-            "valuation": 0.6532,
-            "quality": 0.5,
-            "turnover": 0.5121,
-            "fund_flow": 0.7624,
-            "liquidity": 0.0605,
-            "price_strength": 0.8198
+            "valuation": 0.7308,
+            "quality": 0.7439,
+            "turnover": 0.3484,
+            "fund_flow": 0.6749,
+            "liquidity": 0.4357,
+            "price_strength": 0.7207
           }
         },
         {
-          "symbol": "600461.SH",
-          "name": "洪城环境",
-          "sector": "水务",
-          "factor_score": 0.5707,
-          "pct_chg": 1.0112,
-          "net_flow_ratio": 0.162703,
+          "symbol": "600827.SH",
+          "name": "百联股份",
+          "sector": "超市连锁",
+          "factor_score": 0.6342,
+          "pct_chg": 0.3861,
+          "net_flow_ratio": -0.017284,
           "factors": {
-            "valuation": 0.9337,
-            "quality": 0.5,
-            "turnover": 0.1966,
-            "fund_flow": 0.7573,
-            "liquidity": 0.2997,
-            "price_strength": 0.4802
+            "valuation": 0.9633,
+            "quality": 0.6516,
+            "turnover": 0.2505,
+            "fund_flow": 0.6946,
+            "liquidity": 0.286,
+            "price_strength": 0.7355
           }
         },
         {
-          "symbol": "000598.SZ",
-          "name": "兴蓉环境",
-          "sector": "水务",
-          "factor_score": 0.5691,
-          "pct_chg": 1.264,
-          "net_flow_ratio": 0.088471,
+          "symbol": "601933.SH",
+          "name": "永辉超市",
+          "sector": "超市连锁",
+          "factor_score": 0.5853,
+          "pct_chg": 0.6116,
+          "net_flow_ratio": 0.082276,
           "factors": {
-            "valuation": 0.9365,
-            "quality": 0.5,
-            "turnover": 0.2671,
-            "fund_flow": 0.5753,
-            "liquidity": 0.4833,
-            "price_strength": 0.5334
+            "valuation": 0.2818,
+            "quality": 0.4924,
+            "turnover": 0.5219,
+            "fund_flow": 0.8783,
+            "liquidity": 0.7551,
+            "price_strength": 0.7644
           }
         },
         {
-          "symbol": "600792.SH",
-          "name": "云煤能源",
-          "sector": "焦炭加工",
-          "factor_score": 0.5614,
-          "pct_chg": 3.0556,
-          "net_flow_ratio": 0.041917,
+          "symbol": "688828.SH",
+          "name": "688828.SH",
+          "sector": "未分类",
+          "factor_score": 0.5793,
+          "pct_chg": 419.4628,
+          "net_flow_ratio": 0.053116,
           "factors": {
-            "valuation": 0.6323,
-            "quality": 0.5,
-            "turnover": 0.6775,
-            "fund_flow": 0.5413,
-            "liquidity": 0.1955,
-            "price_strength": 0.8053
+            "valuation": 0.253,
+            "quality": 0.4037,
+            "turnover": 0.5273,
+            "fund_flow": 0.9219,
+            "liquidity": 0.9493,
+            "price_strength": 0.6934
+          }
+        },
+        {
+          "symbol": "002444.SZ",
+          "name": "巨星科技",
+          "sector": "轻工机械",
+          "factor_score": 0.5599,
+          "pct_chg": -1.2282,
+          "net_flow_ratio": -0.040893,
+          "factors": {
+            "valuation": 0.815,
+            "quality": 0.6946,
+            "turnover": 0.1644,
+            "fund_flow": 0.5048,
+            "liquidity": 0.6227,
+            "price_strength": 0.3532
+          }
+        },
+        {
+          "symbol": "002611.SZ",
+          "name": "东方精工",
+          "sector": "轻工机械",
+          "factor_score": 0.5521,
+          "pct_chg": 0.0627,
+          "net_flow_ratio": -0.085534,
+          "factors": {
+            "valuation": 0.8469,
+            "quality": 0.4589,
+            "turnover": 0.3851,
+            "fund_flow": 0.3592,
+            "liquidity": 0.7026,
+            "price_strength": 0.6809
+          }
+        },
+        {
+          "symbol": "600269.SH",
+          "name": "赣粤高速",
+          "sector": "路桥",
+          "factor_score": 0.5449,
+          "pct_chg": -2.7919,
+          "net_flow_ratio": -0.225312,
+          "factors": {
+            "valuation": 0.9622,
+            "quality": 0.6967,
+            "turnover": 0.6605,
+            "fund_flow": 0.099,
+            "liquidity": 0.4818,
+            "price_strength": 0.1125
           }
         }
       ],
       "warnings": [],
       "technical_breadth": {
-        "trade_date": "2026-08-10",
-        "above_ma20": 0.890022,
-        "above_ma60": 0.405092,
-        "composite": 0.69605,
-        "coverage": 0.988521,
-        "sample_size": 2265
+        "trade_date": "2026-08-11",
+        "above_ma20": 0.887014,
+        "above_ma60": 0.335312,
+        "composite": 0.666333,
+        "coverage": 0.982507,
+        "sample_size": 1372
       },
       "active_symbols": [
-        "601199.SH",
-        "601069.SH",
-        "000685.SZ",
-        "002155.SZ",
-        "605337.SH",
-        "002237.SZ",
-        "002086.SZ",
-        "601015.SH",
-        "601020.SH",
-        "600419.SH",
-        "605388.SH",
-        "002385.SZ",
-        "002548.SZ",
-        "300898.SZ",
-        "001337.SZ",
-        "600988.SH",
-        "603363.SH",
-        "000876.SZ",
-        "600547.SH",
-        "002329.SZ",
-        "002114.SZ",
-        "002758.SZ",
-        "601011.SH",
-        "600531.SH",
-        "600338.SH",
-        "600961.SH",
-        "600299.SH",
-        "920786.BJ",
-        "920970.BJ",
-        "002999.SZ",
-        "000426.SZ",
-        "300094.SZ",
-        "600008.SH",
-        "000798.SZ",
-        "600740.SH",
-        "600408.SH",
-        "003039.SZ",
-        "600461.SH",
-        "000598.SZ",
-        "600792.SH",
+        "000661.SZ",
+        "600938.SH",
+        "688336.SH",
+        "002251.SZ",
+        "603001.SH",
+        "000026.SZ",
+        "002612.SZ",
+        "300979.SZ",
+        "600867.SH",
+        "603619.SH",
+        "688278.SH",
+        "300357.SZ",
+        "000983.SZ",
+        "002832.SZ",
+        "301047.SZ",
+        "601116.SH",
+        "600350.SH",
+        "300005.SZ",
+        "600188.SH",
+        "000968.SZ",
+        "601699.SH",
+        "600256.SH",
+        "601857.SH",
+        "601225.SH",
+        "920165.BJ",
+        "600368.SH",
+        "603393.SH",
+        "600012.SH",
+        "601001.SH",
+        "301717.SZ",
+        "600377.SH",
+        "601088.SH",
+        "001256.SZ",
+        "000429.SZ",
+        "600827.SH",
+        "601933.SH",
+        "688828.SH",
+        "002444.SZ",
+        "002611.SZ",
+        "600269.SH",
         "000751.SZ",
         "300285.SZ",
-        "300788.SZ",
+        "600961.SH",
         "601858.SH"
       ],
       "required_position_symbols": [
         "000751.SZ",
         "300285.SZ",
-        "300788.SZ",
         "600961.SH",
         "601858.SH"
       ]
@@ -1807,6 +1842,56 @@
       "unaffordable_symbols": [],
       "etf_fallback_used": [],
       "strategy_version": "v1.0-aggressive"
+    },
+    {
+      "account_id": "github-actions",
+      "trade_date": "2026-08-11",
+      "equity": 107368.02,
+      "cash": 12874.02,
+      "market_value": 94494.0,
+      "daily_return": -0.03812795,
+      "drawdown": -0.03812799,
+      "breadth": 0.666333,
+      "candidate_breadth": 0.829268,
+      "breadth_source": "full_market_ma20_ma60",
+      "market_regime": "进攻",
+      "data_quality": 0.898936,
+      "top_sectors": [
+        {
+          "name": "传媒",
+          "score": 0.7496,
+          "breadth": 1.0,
+          "members": 1
+        },
+        {
+          "name": "电子",
+          "score": 0.7272,
+          "breadth": 1.0,
+          "members": 1
+        },
+        {
+          "name": "交通运输",
+          "score": 0.6979,
+          "breadth": 0.0,
+          "members": 2
+        }
+      ],
+      "selected_symbols": [
+        "601858.SH",
+        "300285.SZ",
+        "300149.SZ",
+        "600961.SH",
+        "688428.SH"
+      ],
+      "requested_exposure": 0.95,
+      "minimum_exposure": 0.7,
+      "minimum_suspended_reason": null,
+      "allocated_exposure": 0.95,
+      "unallocated_exposure": 0.0,
+      "exposure_constraint": null,
+      "unaffordable_symbols": [],
+      "etf_fallback_used": [],
+      "strategy_version": "v1.0-aggressive"
     }
   ],
   "reviews": [
@@ -1849,6 +1934,16 @@
       "diagnosis": "实际持仓低于配置的最低仓位",
       "evidence": "实际仓位 33.6%，最低要求 70.0%",
       "recommendation": "检查是否为模拟首日、无合格趋势信号、涨跌停/停牌拒单或整手约束；下一交易日继续按最低仓位目标补足。"
+    },
+    {
+      "id": 5,
+      "account_id": "github-actions",
+      "trade_date": "2026-08-11",
+      "category": "DATA_INCOMPLETE",
+      "severity": "warning",
+      "diagnosis": "信息不完整或分类覆盖不足",
+      "evidence": "数据质量 89.9%，失败标的 0/44",
+      "recommendation": "暂缓自动升级；检查停牌、复权、行业分类和接口返回。"
     }
   ],
   "daily_journals": [
@@ -4078,6 +4173,947 @@
           "601858.SH"
         ]
       }
+    },
+    {
+      "account_id": "github-actions",
+      "trade_date": "2026-08-11",
+      "strategy_id": "moving_average",
+      "strategy_name": "双均线趋势",
+      "review": {
+        "scheduled_count": 1,
+        "executed_count": 0,
+        "scheduled_actions": [
+          {
+            "symbol": "300285.SZ",
+            "action": "BUY",
+            "reason": "趋势保持且当前仓位低于目标，模拟加仓"
+          }
+        ],
+        "executions": [],
+        "unfilled_symbols": [
+          "300285.SZ"
+        ],
+        "daily_return": -0.03812795,
+        "drawdown": -0.03812799,
+        "corporate_actions": [],
+        "execution_reconciliation": [
+          {
+            "symbol": "300285.SZ",
+            "action": "BUY",
+            "target_weight": 0.2375,
+            "before_shares": 300,
+            "target_shares": 300,
+            "planned_quantity": 0,
+            "actual_quantity": 0,
+            "after_shares": 300,
+            "fill_ratio": 0.0,
+            "constraint_reason": "board_lot_or_already_at_target",
+            "tradability_warning": null,
+            "up_limit": 91.33,
+            "down_limit": 60.89,
+            "actual_weight": 0.201532,
+            "allocation_gap": -0.035968
+          }
+        ]
+      },
+      "analysis": {
+        "market_regime": "进攻",
+        "breadth": 0.666333,
+        "candidate_breadth": 0.829268,
+        "breadth_source": "full_market_ma20_ma60",
+        "data_quality": 0.898936,
+        "top_sectors": [
+          {
+            "name": "传媒",
+            "score": 0.7496,
+            "breadth": 1.0,
+            "members": 1
+          },
+          {
+            "name": "电子",
+            "score": 0.7272,
+            "breadth": 1.0,
+            "members": 1
+          },
+          {
+            "name": "交通运输",
+            "score": 0.6979,
+            "breadth": 0.0,
+            "members": 2
+          }
+        ],
+        "selected_symbols": [
+          "601858.SH",
+          "300285.SZ",
+          "300149.SZ",
+          "600961.SH",
+          "688428.SH"
+        ],
+        "position_count": 4,
+        "equity": 107368.02,
+        "cash": 12874.02,
+        "requested_exposure": 0.95,
+        "minimum_exposure": 0.7,
+        "allocated_exposure": 0.95,
+        "unallocated_exposure": 0.0,
+        "exposure_constraint": null
+      },
+      "decision": {
+        "action_count": 4,
+        "actions": [
+          {
+            "symbol": "000751.SZ",
+            "name": "锌业股份",
+            "sector": "有色金属",
+            "action": "CLOSE",
+            "target_weight": 0.0,
+            "reason": "退出板块/个股优选名单",
+            "signal_price": 5.14,
+            "score": 0.5611,
+            "strategy_version": "v1.0-aggressive",
+            "signal_date": "2026-08-11"
+          },
+          {
+            "symbol": "300149.SZ",
+            "name": "睿智医药",
+            "sector": "医药生物",
+            "action": "BUY",
+            "target_weight": 0.192639,
+            "reason": "双均线有效金叉，ADX 20.6，金叉量比 1.50，个股综合分 0.80",
+            "signal_price": 11.07,
+            "score": 0.7973,
+            "strategy_version": "v1.0-aggressive",
+            "signal_date": "2026-08-11"
+          },
+          {
+            "symbol": "601858.SH",
+            "name": "中国科传",
+            "sector": "传媒",
+            "action": "SELL",
+            "target_weight": 0.181298,
+            "reason": "仍保留趋势，但仓位高于风险目标",
+            "signal_price": 24.58,
+            "score": 0.7496,
+            "strategy_version": "v1.0-aggressive",
+            "signal_date": "2026-08-11"
+          },
+          {
+            "symbol": "688428.SH",
+            "name": "诺诚健华",
+            "sector": "医药生物",
+            "action": "BUY",
+            "target_weight": 0.213468,
+            "reason": "双均线有效金叉，ADX 22.1，金叉量比 2.02，个股综合分 0.64",
+            "signal_price": 31.4,
+            "score": 0.6407,
+            "strategy_version": "v1.0-aggressive",
+            "signal_date": "2026-08-11"
+          }
+        ],
+        "summary": "CLOSE 000751.SZ：退出板块/个股优选名单；BUY 300149.SZ：双均线有效金叉，ADX 20.6，金叉量比 1.50，个股综合分 0.80；SELL 601858.SH：仍保留趋势，但仓位高于风险目标；BUY 688428.SH：双均线有效金叉，ADX 22.1，金叉量比 2.02，个股综合分 0.64",
+        "execution_timing": "当日收盘确认，下一交易日开盘模拟执行"
+      },
+      "reflection": {
+        "category": "DATA",
+        "conclusion": "当日信息不完整，决策可信度下降。",
+        "evidence": [
+          "数据质量 89.9%",
+          "异常或缺失标的 0 个"
+        ],
+        "next_focus": "补齐行情、复权和行业分类后再判断策略是否失效。"
+      },
+      "created_at": "2026-08-11T10:53:52",
+      "market_research": {
+        "mode": "full_market",
+        "trade_date": "2026-08-11",
+        "market_count": 5539,
+        "eligible_count": 3867,
+        "detailed_candidate_count": 40,
+        "factor_weights": {
+          "valuation": 0.2,
+          "quality": 0.25,
+          "turnover": 0.15,
+          "fund_flow": 0.2,
+          "liquidity": 0.1,
+          "price_strength": 0.1
+        },
+        "factor_coverage": {
+          "valuation": 0.9987,
+          "quality": 0.9995,
+          "turnover": 1.0,
+          "fund_flow": 1.0
+        },
+        "market_breadth": 0.3251,
+        "top_sectors": [
+          {
+            "name": "未分类",
+            "score": 0.6276,
+            "breadth": 1.0,
+            "net_flow_ratio": 0.052663,
+            "quality": 0.6667,
+            "members": 3
+          },
+          {
+            "name": "超市连锁",
+            "score": 0.6054,
+            "breadth": 0.8571,
+            "net_flow_ratio": 0.020943,
+            "quality": 0.5389,
+            "members": 7
+          },
+          {
+            "name": "路桥",
+            "score": 0.5994,
+            "breadth": 0.4444,
+            "net_flow_ratio": -0.060306,
+            "quality": 0.6914,
+            "members": 9
+          },
+          {
+            "name": "生物制药",
+            "score": 0.5944,
+            "breadth": 0.6667,
+            "net_flow_ratio": -0.011598,
+            "quality": 0.6151,
+            "members": 69
+          },
+          {
+            "name": "轻工机械",
+            "score": 0.5838,
+            "breadth": 0.3333,
+            "net_flow_ratio": -0.038679,
+            "quality": 0.658,
+            "members": 3
+          },
+          {
+            "name": "石油开采",
+            "score": 0.5834,
+            "breadth": 0.75,
+            "net_flow_ratio": -0.009453,
+            "quality": 0.4625,
+            "members": 20
+          },
+          {
+            "name": "服饰",
+            "score": 0.5825,
+            "breadth": 0.625,
+            "net_flow_ratio": -0.028188,
+            "quality": 0.623,
+            "members": 32
+          },
+          {
+            "name": "煤炭开采",
+            "score": 0.5804,
+            "breadth": 0.5,
+            "net_flow_ratio": -0.011107,
+            "quality": 0.4808,
+            "members": 24
+          }
+        ],
+        "candidates": [
+          {
+            "symbol": "000661.SZ",
+            "name": "长春高新",
+            "sector": "生物制药",
+            "factor_score": 0.8268,
+            "pct_chg": 4.5783,
+            "net_flow_ratio": 0.116668,
+            "factors": {
+              "valuation": 0.6512,
+              "quality": 0.7644,
+              "turnover": 0.8662,
+              "fund_flow": 0.9285,
+              "liquidity": 0.9496,
+              "price_strength": 0.9491
+            }
+          },
+          {
+            "symbol": "600938.SH",
+            "name": "中国海油",
+            "sector": "石油开采",
+            "factor_score": 0.8044,
+            "pct_chg": 5.3125,
+            "net_flow_ratio": 0.076213,
+            "factors": {
+              "valuation": 0.8264,
+              "quality": 0.7505,
+              "turnover": 0.4718,
+              "fund_flow": 0.9445,
+              "liquidity": 0.9578,
+              "price_strength": 0.9604
+            }
+          },
+          {
+            "symbol": "688336.SH",
+            "name": "三生国健",
+            "sector": "生物制药",
+            "factor_score": 0.7806,
+            "pct_chg": 2.9443,
+            "net_flow_ratio": 0.04137,
+            "factors": {
+              "valuation": 0.5859,
+              "quality": 0.7391,
+              "turnover": 0.8816,
+              "fund_flow": 0.8559,
+              "liquidity": 0.8399,
+              "price_strength": 0.9118
+            }
+          },
+          {
+            "symbol": "002251.SZ",
+            "name": "步步高",
+            "sector": "超市连锁",
+            "factor_score": 0.7695,
+            "pct_chg": 3.7333,
+            "net_flow_ratio": 0.171431,
+            "factors": {
+              "valuation": 0.5787,
+              "quality": 0.605,
+              "turnover": 0.9271,
+              "fund_flow": 0.926,
+              "liquidity": 0.8492,
+              "price_strength": 0.9328
+            }
+          },
+          {
+            "symbol": "603001.SH",
+            "name": "奥康国际",
+            "sector": "服饰",
+            "factor_score": 0.7642,
+            "pct_chg": 3.7992,
+            "net_flow_ratio": 0.111905,
+            "factors": {
+              "valuation": 0.6863,
+              "quality": 0.6874,
+              "turnover": 0.8652,
+              "fund_flow": 0.9508,
+              "liquidity": 0.4166,
+              "price_strength": 0.9346
+            }
+          },
+          {
+            "symbol": "000026.SZ",
+            "name": "飞亚达",
+            "sector": "服饰",
+            "factor_score": 0.7531,
+            "pct_chg": 5.0341,
+            "net_flow_ratio": 0.041859,
+            "factors": {
+              "valuation": 0.4784,
+              "quality": 0.6889,
+              "turnover": 0.9245,
+              "fund_flow": 0.8702,
+              "liquidity": 0.7675,
+              "price_strength": 0.9568
+            }
+          },
+          {
+            "symbol": "002612.SZ",
+            "name": "朗姿股份",
+            "sector": "服饰",
+            "factor_score": 0.7447,
+            "pct_chg": 0.8358,
+            "net_flow_ratio": 0.030381,
+            "factors": {
+              "valuation": 0.8168,
+              "quality": 0.5523,
+              "turnover": 0.8712,
+              "fund_flow": 0.8275,
+              "liquidity": 0.6791,
+              "price_strength": 0.7913
+            }
+          },
+          {
+            "symbol": "300979.SZ",
+            "name": "华利集团",
+            "sector": "服饰",
+            "factor_score": 0.7366,
+            "pct_chg": 5.8341,
+            "net_flow_ratio": 0.140416,
+            "factors": {
+              "valuation": 0.7366,
+              "quality": 0.6433,
+              "turnover": 0.5685,
+              "fund_flow": 0.9568,
+              "liquidity": 0.5518,
+              "price_strength": 0.9664
+            }
+          },
+          {
+            "symbol": "600867.SH",
+            "name": "通化东宝",
+            "sector": "生物制药",
+            "factor_score": 0.7341,
+            "pct_chg": 0.8353,
+            "net_flow_ratio": -0.00823,
+            "factors": {
+              "valuation": 0.7815,
+              "quality": 0.8151,
+              "turnover": 0.637,
+              "fund_flow": 0.6389,
+              "liquidity": 0.7161,
+              "price_strength": 0.7908
+            }
+          },
+          {
+            "symbol": "603619.SH",
+            "name": "中曼石油",
+            "sector": "石油开采",
+            "factor_score": 0.7307,
+            "pct_chg": 1.5666,
+            "net_flow_ratio": 0.024657,
+            "factors": {
+              "valuation": 0.6013,
+              "quality": 0.5122,
+              "turnover": 0.9174,
+              "fund_flow": 0.8454,
+              "liquidity": 0.9022,
+              "price_strength": 0.8549
+            }
+          },
+          {
+            "symbol": "688278.SH",
+            "name": "特宝生物",
+            "sector": "生物制药",
+            "factor_score": 0.7293,
+            "pct_chg": 3.5977,
+            "net_flow_ratio": 0.097224,
+            "factors": {
+              "valuation": 0.4537,
+              "quality": 0.8869,
+              "turnover": 0.6175,
+              "fund_flow": 0.8043,
+              "liquidity": 0.7024,
+              "price_strength": 0.931
+            }
+          },
+          {
+            "symbol": "300357.SZ",
+            "name": "我武生物",
+            "sector": "生物制药",
+            "factor_score": 0.724,
+            "pct_chg": 1.5194,
+            "net_flow_ratio": 0.04758,
+            "factors": {
+              "valuation": 0.4594,
+              "quality": 0.8437,
+              "turnover": 0.7231,
+              "fund_flow": 0.7821,
+              "liquidity": 0.7124,
+              "price_strength": 0.8508
+            }
+          },
+          {
+            "symbol": "000983.SZ",
+            "name": "山西焦煤",
+            "sector": "煤炭开采",
+            "factor_score": 0.7184,
+            "pct_chg": 1.4771,
+            "net_flow_ratio": 0.047907,
+            "factors": {
+              "valuation": 0.7926,
+              "quality": 0.6031,
+              "turnover": 0.4774,
+              "fund_flow": 0.8836,
+              "liquidity": 0.7603,
+              "price_strength": 0.8474
+            }
+          },
+          {
+            "symbol": "002832.SZ",
+            "name": "比音勒芬",
+            "sector": "服饰",
+            "factor_score": 0.7157,
+            "pct_chg": 1.3122,
+            "net_flow_ratio": 0.036404,
+            "factors": {
+              "valuation": 0.6515,
+              "quality": 0.7819,
+              "turnover": 0.6344,
+              "fund_flow": 0.6911,
+              "liquidity": 0.7365,
+              "price_strength": 0.8293
+            }
+          },
+          {
+            "symbol": "301047.SZ",
+            "name": "义翘神州",
+            "sector": "生物制药",
+            "factor_score": 0.7132,
+            "pct_chg": 4.7267,
+            "net_flow_ratio": 0.01944,
+            "factors": {
+              "valuation": 0.4194,
+              "quality": 0.7399,
+              "turnover": 0.6049,
+              "fund_flow": 0.8273,
+              "liquidity": 0.9289,
+              "price_strength": 0.9522
+            }
+          },
+          {
+            "symbol": "601116.SH",
+            "name": "三江购物",
+            "sector": "超市连锁",
+            "factor_score": 0.7127,
+            "pct_chg": 1.8657,
+            "net_flow_ratio": 0.048473,
+            "factors": {
+              "valuation": 0.6833,
+              "quality": 0.5947,
+              "turnover": 0.7835,
+              "fund_flow": 0.8915,
+              "liquidity": 0.444,
+              "price_strength": 0.8715
+            }
+          },
+          {
+            "symbol": "600350.SH",
+            "name": "山东高速",
+            "sector": "路桥",
+            "factor_score": 0.7022,
+            "pct_chg": 1.4953,
+            "net_flow_ratio": 0.15622,
+            "factors": {
+              "valuation": 0.821,
+              "quality": 0.6405,
+              "turnover": 0.4658,
+              "fund_flow": 0.8582,
+              "liquidity": 0.5146,
+              "price_strength": 0.8487
+            }
+          },
+          {
+            "symbol": "300005.SZ",
+            "name": "探路者",
+            "sector": "服饰",
+            "factor_score": 0.6974,
+            "pct_chg": 4.7016,
+            "net_flow_ratio": 0.083474,
+            "factors": {
+              "valuation": 0.2534,
+              "quality": 0.7057,
+              "turnover": 0.7247,
+              "fund_flow": 0.9303,
+              "liquidity": 0.8035,
+              "price_strength": 0.9516
+            }
+          },
+          {
+            "symbol": "600188.SH",
+            "name": "兖矿能源",
+            "sector": "煤炭开采",
+            "factor_score": 0.6881,
+            "pct_chg": 1.4692,
+            "net_flow_ratio": 0.017025,
+            "factors": {
+              "valuation": 0.636,
+              "quality": 0.5355,
+              "turnover": 0.6273,
+              "fund_flow": 0.779,
+              "liquidity": 0.9258,
+              "price_strength": 0.8461
+            }
+          },
+          {
+            "symbol": "000968.SZ",
+            "name": "蓝焰控股",
+            "sector": "石油开采",
+            "factor_score": 0.6834,
+            "pct_chg": 0.2766,
+            "net_flow_ratio": -0.026743,
+            "factors": {
+              "valuation": 0.8285,
+              "quality": 0.7125,
+              "turnover": 0.7925,
+              "fund_flow": 0.4573,
+              "liquidity": 0.5772,
+              "price_strength": 0.7155
+            }
+          },
+          {
+            "symbol": "601699.SH",
+            "name": "潞安环能",
+            "sector": "煤炭开采",
+            "factor_score": 0.6819,
+            "pct_chg": -0.0614,
+            "net_flow_ratio": 0.019948,
+            "factors": {
+              "valuation": 0.7279,
+              "quality": 0.6679,
+              "turnover": 0.511,
+              "fund_flow": 0.7314,
+              "liquidity": 0.8141,
+              "price_strength": 0.6501
+            }
+          },
+          {
+            "symbol": "600256.SH",
+            "name": "广汇能源",
+            "sector": "石油开采",
+            "factor_score": 0.6636,
+            "pct_chg": 1.3817,
+            "net_flow_ratio": 0.116678,
+            "factors": {
+              "valuation": 0.6697,
+              "quality": 0.3688,
+              "turnover": 0.5278,
+              "fund_flow": 0.9485,
+              "liquidity": 0.8479,
+              "price_strength": 0.8384
+            }
+          },
+          {
+            "symbol": "601857.SH",
+            "name": "中国石油",
+            "sector": "石油开采",
+            "factor_score": 0.6617,
+            "pct_chg": 1.9355,
+            "net_flow_ratio": -0.065452,
+            "factors": {
+              "valuation": 0.9049,
+              "quality": 0.5715,
+              "turnover": 0.2463,
+              "fund_flow": 0.6074,
+              "liquidity": 0.9178,
+              "price_strength": 0.8764
+            }
+          },
+          {
+            "symbol": "601225.SH",
+            "name": "陕西煤业",
+            "sector": "煤炭开采",
+            "factor_score": 0.6612,
+            "pct_chg": -0.4224,
+            "net_flow_ratio": 0.003606,
+            "factors": {
+              "valuation": 0.7434,
+              "quality": 0.7192,
+              "turnover": 0.2356,
+              "fund_flow": 0.7551,
+              "liquidity": 0.8891,
+              "price_strength": 0.5741
+            }
+          },
+          {
+            "symbol": "920165.BJ",
+            "name": "920165.BJ",
+            "sector": "未分类",
+            "factor_score": 0.6581,
+            "pct_chg": 138.5254,
+            "net_flow_ratio": 0.0,
+            "factors": {
+              "valuation": 0.441,
+              "quality": 0.8232,
+              "turnover": 0.5273,
+              "fund_flow": 0.7219,
+              "liquidity": 0.7127,
+              "price_strength": 0.6934
+            }
+          },
+          {
+            "symbol": "600368.SH",
+            "name": "五洲交通",
+            "sector": "路桥",
+            "factor_score": 0.6538,
+            "pct_chg": -1.9656,
+            "net_flow_ratio": -0.001816,
+            "factors": {
+              "valuation": 0.951,
+              "quality": 0.7535,
+              "turnover": 0.4802,
+              "fund_flow": 0.787,
+              "liquidity": 0.2527,
+              "price_strength": 0.2051
+            }
+          },
+          {
+            "symbol": "603393.SH",
+            "name": "新天然气",
+            "sector": "石油开采",
+            "factor_score": 0.6509,
+            "pct_chg": -1.5489,
+            "net_flow_ratio": -0.062302,
+            "factors": {
+              "valuation": 0.856,
+              "quality": 0.659,
+              "turnover": 0.6992,
+              "fund_flow": 0.5821,
+              "liquidity": 0.6568,
+              "price_strength": 0.2793
+            }
+          },
+          {
+            "symbol": "600012.SH",
+            "name": "皖通高速",
+            "sector": "路桥",
+            "factor_score": 0.6495,
+            "pct_chg": 1.1957,
+            "net_flow_ratio": 0.069789,
+            "factors": {
+              "valuation": 0.7928,
+              "quality": 0.6424,
+              "turnover": 0.4886,
+              "fund_flow": 0.6822,
+              "liquidity": 0.3822,
+              "price_strength": 0.8236
+            }
+          },
+          {
+            "symbol": "601001.SH",
+            "name": "晋控煤业",
+            "sector": "煤炭开采",
+            "factor_score": 0.6482,
+            "pct_chg": -2.9444,
+            "net_flow_ratio": -0.023098,
+            "factors": {
+              "valuation": 0.8307,
+              "quality": 0.7153,
+              "turnover": 0.5205,
+              "fund_flow": 0.6936,
+              "liquidity": 0.7634,
+              "price_strength": 0.1011
+            }
+          },
+          {
+            "symbol": "301717.SZ",
+            "name": "301717.SZ",
+            "sector": "未分类",
+            "factor_score": 0.6455,
+            "pct_chg": 662.2367,
+            "net_flow_ratio": 0.104874,
+            "factors": {
+              "valuation": 0.0494,
+              "quality": 0.7733,
+              "turnover": 0.5273,
+              "fund_flow": 0.974,
+              "liquidity": 0.9909,
+              "price_strength": 0.6934
+            }
+          },
+          {
+            "symbol": "600377.SH",
+            "name": "宁沪高速",
+            "sector": "路桥",
+            "factor_score": 0.6452,
+            "pct_chg": 0.8354,
+            "net_flow_ratio": 0.143483,
+            "factors": {
+              "valuation": 0.8887,
+              "quality": 0.6184,
+              "turnover": 0.1362,
+              "fund_flow": 0.948,
+              "liquidity": 0.2371,
+              "price_strength": 0.7911
+            }
+          },
+          {
+            "symbol": "601088.SH",
+            "name": "中国神华",
+            "sector": "煤炭开采",
+            "factor_score": 0.6401,
+            "pct_chg": 0.0448,
+            "net_flow_ratio": -0.019171,
+            "factors": {
+              "valuation": 0.7616,
+              "quality": 0.7236,
+              "turnover": 0.1374,
+              "fund_flow": 0.6513,
+              "liquidity": 0.8831,
+              "price_strength": 0.6773
+            }
+          },
+          {
+            "symbol": "001256.SZ",
+            "name": "炜冈科技",
+            "sector": "轻工机械",
+            "factor_score": 0.6394,
+            "pct_chg": -1.2594,
+            "net_flow_ratio": 0.010389,
+            "factors": {
+              "valuation": 0.6036,
+              "quality": 0.8206,
+              "turnover": 0.7627,
+              "fund_flow": 0.6456,
+              "liquidity": 0.3558,
+              "price_strength": 0.3439
+            }
+          },
+          {
+            "symbol": "000429.SZ",
+            "name": "粤高速A",
+            "sector": "路桥",
+            "factor_score": 0.635,
+            "pct_chg": 0.3019,
+            "net_flow_ratio": 0.052958,
+            "factors": {
+              "valuation": 0.7308,
+              "quality": 0.7439,
+              "turnover": 0.3484,
+              "fund_flow": 0.6749,
+              "liquidity": 0.4357,
+              "price_strength": 0.7207
+            }
+          },
+          {
+            "symbol": "600827.SH",
+            "name": "百联股份",
+            "sector": "超市连锁",
+            "factor_score": 0.6342,
+            "pct_chg": 0.3861,
+            "net_flow_ratio": -0.017284,
+            "factors": {
+              "valuation": 0.9633,
+              "quality": 0.6516,
+              "turnover": 0.2505,
+              "fund_flow": 0.6946,
+              "liquidity": 0.286,
+              "price_strength": 0.7355
+            }
+          },
+          {
+            "symbol": "601933.SH",
+            "name": "永辉超市",
+            "sector": "超市连锁",
+            "factor_score": 0.5853,
+            "pct_chg": 0.6116,
+            "net_flow_ratio": 0.082276,
+            "factors": {
+              "valuation": 0.2818,
+              "quality": 0.4924,
+              "turnover": 0.5219,
+              "fund_flow": 0.8783,
+              "liquidity": 0.7551,
+              "price_strength": 0.7644
+            }
+          },
+          {
+            "symbol": "688828.SH",
+            "name": "688828.SH",
+            "sector": "未分类",
+            "factor_score": 0.5793,
+            "pct_chg": 419.4628,
+            "net_flow_ratio": 0.053116,
+            "factors": {
+              "valuation": 0.253,
+              "quality": 0.4037,
+              "turnover": 0.5273,
+              "fund_flow": 0.9219,
+              "liquidity": 0.9493,
+              "price_strength": 0.6934
+            }
+          },
+          {
+            "symbol": "002444.SZ",
+            "name": "巨星科技",
+            "sector": "轻工机械",
+            "factor_score": 0.5599,
+            "pct_chg": -1.2282,
+            "net_flow_ratio": -0.040893,
+            "factors": {
+              "valuation": 0.815,
+              "quality": 0.6946,
+              "turnover": 0.1644,
+              "fund_flow": 0.5048,
+              "liquidity": 0.6227,
+              "price_strength": 0.3532
+            }
+          },
+          {
+            "symbol": "002611.SZ",
+            "name": "东方精工",
+            "sector": "轻工机械",
+            "factor_score": 0.5521,
+            "pct_chg": 0.0627,
+            "net_flow_ratio": -0.085534,
+            "factors": {
+              "valuation": 0.8469,
+              "quality": 0.4589,
+              "turnover": 0.3851,
+              "fund_flow": 0.3592,
+              "liquidity": 0.7026,
+              "price_strength": 0.6809
+            }
+          },
+          {
+            "symbol": "600269.SH",
+            "name": "赣粤高速",
+            "sector": "路桥",
+            "factor_score": 0.5449,
+            "pct_chg": -2.7919,
+            "net_flow_ratio": -0.225312,
+            "factors": {
+              "valuation": 0.9622,
+              "quality": 0.6967,
+              "turnover": 0.6605,
+              "fund_flow": 0.099,
+              "liquidity": 0.4818,
+              "price_strength": 0.1125
+            }
+          }
+        ],
+        "warnings": [],
+        "technical_breadth": {
+          "trade_date": "2026-08-11",
+          "above_ma20": 0.887014,
+          "above_ma60": 0.335312,
+          "composite": 0.666333,
+          "coverage": 0.982507,
+          "sample_size": 1372
+        },
+        "active_symbols": [
+          "000661.SZ",
+          "600938.SH",
+          "688336.SH",
+          "002251.SZ",
+          "603001.SH",
+          "000026.SZ",
+          "002612.SZ",
+          "300979.SZ",
+          "600867.SH",
+          "603619.SH",
+          "688278.SH",
+          "300357.SZ",
+          "000983.SZ",
+          "002832.SZ",
+          "301047.SZ",
+          "601116.SH",
+          "600350.SH",
+          "300005.SZ",
+          "600188.SH",
+          "000968.SZ",
+          "601699.SH",
+          "600256.SH",
+          "601857.SH",
+          "601225.SH",
+          "920165.BJ",
+          "600368.SH",
+          "603393.SH",
+          "600012.SH",
+          "601001.SH",
+          "301717.SZ",
+          "600377.SH",
+          "601088.SH",
+          "001256.SZ",
+          "000429.SZ",
+          "600827.SH",
+          "601933.SH",
+          "688828.SH",
+          "002444.SZ",
+          "002611.SZ",
+          "600269.SH",
+          "000751.SZ",
+          "300285.SZ",
+          "600961.SH",
+          "601858.SH"
+        ],
+        "required_position_symbols": [
+          "000751.SZ",
+          "300285.SZ",
+          "600961.SH",
+          "601858.SH"
+        ]
+      }
     }
   ],
   "strategy_versions": [
@@ -4127,7 +5163,7 @@
   "counters": {
     "execution": 19,
     "corporate_action": 0,
-    "review": 4,
+    "review": 5,
     "upgrade_event": 0
   }
 }
