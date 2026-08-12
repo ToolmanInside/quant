@@ -282,8 +282,8 @@ def test_unified_config_resolves_secrets_and_all_runtime_settings(
     assert config.paper_account.strategy_id == "moving_average"
     assert config.paper_account.risk_profile == "aggressive"
     assert config.paper_account.minimum_invested_ratio == 0.70
-    assert config.position_report_at == "12:00"
-    assert config.daily_close_at == "18:00"
+    assert config.position_report_at == "15:10"
+    assert config.daily_close_at == "15:10"
     assert config.state_directory.as_posix() == ".quant-state/accounts"
     assert config.reinitialize_on_config_change
 def test_unified_config_rejects_string_boolean(tmp_path, monkeypatch) -> None:

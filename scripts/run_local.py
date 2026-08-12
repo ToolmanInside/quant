@@ -3,7 +3,7 @@ from __future__ import annotations
 """Quant Lab 本地服务启动器（跨平台：Windows / macOS / Linux）。
 
 启动 FastAPI 后端（uvicorn）与 Next.js 前端（next dev），
-并负责每个交易日下午 18:00（北京时间）自动运行模拟盘日终任务。
+并负责每个交易日下午 15:10（北京时间）自动运行模拟盘日终任务。
 
 用法：
     python scripts/run_local.py [--no-browser] [--timeout 60] [--log-file logs/quant-lab.log]
@@ -40,7 +40,8 @@ PAPER_ADVANCE_URL = f"http://{HOST}:{API_PORT}/api/paper/advance"
 
 DEFAULT_LOG_FILE = PROJECT_ROOT / "logs" / "quant-lab.log"
 SIMULATION_TIMEZONE = "Asia/Shanghai"
-DAILY_SIMULATION_HOUR = 18
+DAILY_SIMULATION_HOUR = 15
+DAILY_SIMULATION_MINUTE = 10
 STARTUP_TIMEOUT_SECONDS = 60
 POLL_INTERVAL_SECONDS = 30
 TASK_RETRY_LIMIT = 3
@@ -150,14 +151,15 @@ def run_daily_paper_if_due(
     failures: int,
     next_attempt_at: datetime,
 ) -> tuple[date | None, int, datetime]:
-    """到 18 点（北京时间）且当天未运行时执行日终任务。
+    """到 15:10（北京时间）且当天未运行时执行日终任务。
 
     失败后延迟 TASK_RETRY_DELAY_SECONDS 重试，最多 TASK_RETRY_LIMIT 次；
     重试耗尽后当天不再尝试（避免无限重试）。
     """
     now = _now()
     today = now.date()
-    if last_attempt == today or now.hour < DAILY_SIMULATION_HOUR:
+    due = (now.hour, now.minute) >= (DAILY_SIMULATION_HOUR, DAILY_SIMULATION_MINUTE)
+    if last_attempt == today or not due:
         return last_attempt, failures, next_attempt_at
     if failures >= TASK_RETRY_LIMIT:
         # 今日重试次数耗尽，标记已尝试，次日再试

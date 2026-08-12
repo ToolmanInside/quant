@@ -215,8 +215,8 @@ def load_unified_config(path: Path) -> UnifiedConfig:
     report = payload.get("report") or {}
     timezone = str(schedule.get("timezone", "Asia/Shanghai"))
     ZoneInfo(timezone)
-    position_report_at = str(schedule.get("position_report_at", "12:00"))
-    daily_close_at = str(schedule.get("daily_close_at", "18:00"))
+    position_report_at = str(schedule.get("position_report_at", "15:10"))
+    daily_close_at = str(schedule.get("daily_close_at", "15:10"))
     for field_name, field_value in (
         ("schedule.position_report_at", position_report_at),
         ("schedule.daily_close_at", daily_close_at),
