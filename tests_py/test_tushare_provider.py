@@ -151,3 +151,34 @@ def test_quality_filter_accepts_second_resolution_announcement_dates(
     result = provider._fetch_quality_snapshot(date(2026, 4, 20), [])
 
     assert list(result["ts_code"]) == ["000001.SZ"]
+
+
+def test_quality_filter_accepts_float_ann_date_from_csv_cache(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """CSV 回读后 ann_date 常变成 20260408.0；旧解析会全变 NaT 导致质量因子 0%。"""
+    monkeypatch.setattr(providers, "CACHE_DIR", tmp_path)
+    cache_path = tmp_path / "market_quality_raw_20260331.csv"
+    pd.DataFrame(
+        [
+            {
+                "ts_code": "000001.SZ",
+                "ann_date": 20260408.0,
+                "end_date": 20260331.0,
+                "roe": 11.0,
+            },
+            {
+                "ts_code": "000002.SZ",
+                "ann_date": 20260820.0,
+                "end_date": 20260331.0,
+                "roe": 22.0,
+            },
+        ]
+    ).to_csv(cache_path, index=False)
+
+    provider = _provider()
+    result = provider._fetch_quality_snapshot(date(2026, 8, 11), [])
+
+    assert list(result["ts_code"]) == ["000001.SZ"]
+    assert float(result.loc[0, "roe"]) == 11.0

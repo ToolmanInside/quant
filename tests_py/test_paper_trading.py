@@ -170,12 +170,31 @@ class FullMarketProvider(FakeProvider):
         trade_date: date,
     ) -> dict[str, float | int | str]:
         return {
-            "breadth_ma20": 0.6,
-            "breadth_ma60": 0.5,
-            "breadth_combined": 0.55,
+            "trade_date": trade_date.isoformat(),
+            "above_ma20": 0.6,
+            "above_ma60": 0.5,
+            "composite": 0.55,
             "coverage": 0.9,
-            "source": "test_fixture",
+            "sample_size": len(SYMBOLS),
         }
+
+    def fetch_market_technical_frame(self, trade_date: date) -> pd.DataFrame:
+        rows = []
+        for index, symbol in enumerate(SYMBOLS):
+            close = 10.0 + index
+            # 让最后一只明显站上双均线，验证趋势袖套能从全市场捞人
+            ma20 = close * (0.90 if index == len(SYMBOLS) - 1 else 1.05)
+            ma60 = close * (0.85 if index == len(SYMBOLS) - 1 else 1.10)
+            rows.append(
+                {
+                    "ts_code": symbol,
+                    "trade_date": trade_date.strftime("%Y%m%d"),
+                    "close_qfq": close,
+                    "ma_qfq_20": ma20,
+                    "ma_qfq_60": ma60,
+                }
+            )
+        return pd.DataFrame(rows)
 
 
 def test_full_market_advance_scans_beyond_requested_pool(tmp_path) -> None:

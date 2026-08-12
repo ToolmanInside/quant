@@ -465,14 +465,17 @@ def _market_research_lines(dashboard: dict[str, Any]) -> list[str]:
             f"- 截面日期 **{research.get('trade_date', '—')}**；扫描 "
             f"**{int(research.get('market_count', 0)):,}** 只，基础过滤后 "
             f"**{int(research.get('eligible_count', 0)):,}** 只，进入详细趋势池 "
-            f"**{int(research.get('detailed_candidate_count', 0))}** 只。"
+            f"**{int(research.get('detailed_candidate_count', 0))}** 只"
+            f"（因子袖 {int(research.get('factor_sleeve_count', 0))} / "
+            f"趋势袖 {int(research.get('trend_sleeve_count', 0))}）。"
         ),
         (
             "- 因子覆盖率："
             f"估值 {float(coverage.get('valuation', 0)):.0%}；"
             f"盈利质量 {float(coverage.get('quality', 0)):.0%}；"
             f"换手 {float(coverage.get('turnover', 0)):.0%}；"
-            f"资金流 {float(coverage.get('fund_flow', 0)):.0%}。"
+            f"资金流 {float(coverage.get('fund_flow', 0)):.0%}；"
+            f"技术面 {float(coverage.get('technical', 0)):.0%}。"
         ),
         (
             f"- 全市场过滤样本上涨宽度："
@@ -1158,8 +1161,34 @@ def _advance_day_by_day(
             market_research_summary,
         )
         LOGGER.info(
-            "逐日推演 %s 的全市场截面；详细候选池 %s 只（%s/%s）",
+            "逐日推演 %s：全市场扫描 %s 只 → 过滤 %s 只 → 详细池 %s "
+            "（因子袖 %s + 趋势袖 %s；含持仓/计划后活跃 %s）（%s/%s）",
             replay_date,
+            (
+                market_research_summary.get("market_count", "?")
+                if market_research_summary
+                else "?"
+            ),
+            (
+                market_research_summary.get("eligible_count", "?")
+                if market_research_summary
+                else "?"
+            ),
+            (
+                market_research_summary.get("detailed_candidate_count", "?")
+                if market_research_summary
+                else "?"
+            ),
+            (
+                market_research_summary.get("factor_sleeve_count", "?")
+                if market_research_summary
+                else "?"
+            ),
+            (
+                market_research_summary.get("trend_sleeve_count", "?")
+                if market_research_summary
+                else "?"
+            ),
             len(active_symbols),
             index + 1,
             len(open_dates),

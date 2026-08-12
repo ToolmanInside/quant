@@ -413,11 +413,11 @@ class TushareDataProvider:
         ).astype("datetime64[ns]")
         return trade_date, snapshot, errors
 
-    def fetch_market_technical_breadth(
-        self,
-        trade_date: date,
-    ) -> dict[str, float | int | str]:
-        """Calculate whole-market medium-term breadth from point-in-time factors."""
+    def fetch_market_technical_frame(self, trade_date: date) -> pd.DataFrame:
+        """全市场点对点技术面截面（前复权收盘与 20/60 日均线）。
+
+        供市场宽度与“趋势袖套”选股共用，避免只在精选池里算均线。
+        """
         cache_path = CACHE_DIR / f"market_technical_{trade_date:%Y%m%d}.csv"
         if cache_path.exists():
             frame = pd.read_csv(cache_path)
@@ -431,19 +431,38 @@ class TushareDataProvider:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             frame.to_csv(cache_path, index=False, encoding="utf-8")
 
-        required = {"close_qfq", "ma_qfq_20", "ma_qfq_60"}
+        required = {"ts_code", "close_qfq", "ma_qfq_20", "ma_qfq_60"}
         missing = sorted(required.difference(frame.columns))
         if missing:
             raise ValueError(f"stk_factor_pro 缺少字段：{', '.join(missing)}")
+        return frame
+
+    def fetch_market_technical_breadth(
+        self,
+        trade_date: date,
+    ) -> dict[str, float | int | str]:
+        """Calculate whole-market medium-term breadth from point-in-time factors."""
+        frame = self.fetch_market_technical_frame(trade_date)
+        return self._technical_breadth_from_frame(frame, trade_date)
+
+    @staticmethod
+    def _technical_breadth_from_frame(
+        frame: pd.DataFrame,
+        trade_date: date,
+    ) -> dict[str, float | int | str]:
         close = pd.to_numeric(frame["close_qfq"], errors="coerce")
         ma20 = pd.to_numeric(frame["ma_qfq_20"], errors="coerce")
         ma60 = pd.to_numeric(frame["ma_qfq_60"], errors="coerce")
         valid20 = close.notna() & ma20.notna() & (ma20 > 0)
         valid60 = close.notna() & ma60.notna() & (ma60 > 0)
         total = max(len(frame), 1)
-        breadth20 = float((close[valid20] > ma20[valid20]).mean()) if valid20.any() else 0.0
-        breadth60 = float((close[valid60] > ma60[valid60]).mean()) if valid60.any() else 0.0
-        coverage = float(min(valid20.sum(), valid60.sum()) / total)
+        breadth20 = (
+            float((close[valid20] > ma20[valid20]).mean()) if valid20.any() else 0.0
+        )
+        breadth60 = (
+            float((close[valid60] > ma60[valid60]).mean()) if valid60.any() else 0.0
+        )
+        coverage = float(min(int(valid20.sum()), int(valid60.sum())) / total)
         return {
             "trade_date": trade_date.isoformat(),
             "above_ma20": round(breadth20, 6),
@@ -452,6 +471,24 @@ class TushareDataProvider:
             "coverage": round(coverage, 6),
             "sample_size": int(len(frame)),
         }
+
+    @staticmethod
+    def _parse_vendor_date_series(values: pd.Series) -> pd.Series:
+        """Parse Tushare date columns that may be int/float/str/Timestamp.
+
+        CSV round-trips often turn ``20260408`` into float ``20260408.0``; plain
+        ``format='mixed'`` then yields all-NaT and silently drops every quality row.
+        """
+        if pd.api.types.is_datetime64_any_dtype(values):
+            return pd.to_datetime(values).astype("datetime64[ns]")
+        text = (
+            values.astype(str)
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)
+            .str.replace(r"\D", "", regex=True)
+        )
+        parsed = pd.to_datetime(text, format="%Y%m%d", errors="coerce")
+        return parsed.astype("datetime64[ns]")
 
     def _fetch_stock_basic(self) -> pd.DataFrame:
         cache_path = CACHE_DIR / "stock_basic_listed.csv"
@@ -560,13 +597,10 @@ class TushareDataProvider:
 
         frame = frame.copy()
         if "ann_date" in frame.columns:
-            announcement_dates = pd.to_datetime(
-                frame["ann_date"].astype(str),
-                format="mixed",
-                errors="coerce",
-            ).astype("datetime64[ns]")
+            announcement_dates = self._parse_vendor_date_series(frame["ann_date"])
             frame = frame[
-                announcement_dates <= pd.Timestamp(trade_date).as_unit("ns")
+                announcement_dates.notna()
+                & (announcement_dates <= pd.Timestamp(trade_date).as_unit("ns"))
             ]
         if frame.empty:
             return frame.reset_index(drop=True)

@@ -2,8 +2,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import pytest
-
 import scripts.run_local as runner
 
 
@@ -13,7 +11,7 @@ def _fixed_now(hour: int = 19, minute: int = 0) -> datetime:
     )
 
 
-def test_daily_task_runs_once_per_day_at_or_after_18(monkeypatch) -> None:
+def test_daily_task_runs_once_per_day_at_or_after_1510(monkeypatch) -> None:
     monkeypatch.setattr(runner, "_now", lambda: _fixed_now())
     today = date(2026, 8, 7)
     last_attempt = None
@@ -21,15 +19,15 @@ def test_daily_task_runs_once_per_day_at_or_after_18(monkeypatch) -> None:
     # 初始重试时间为当天零点之前，确保第一个到点场景必然执行
     next_attempt_at = _fixed_now(0, 0) - timedelta(seconds=1)
 
-    # 未到 18 点不执行
-    monkeypatch.setattr(runner, "_now", lambda: _fixed_now(17, 59))
+    # 未到 15:10 不执行
+    monkeypatch.setattr(runner, "_now", lambda: _fixed_now(15, 9))
     last_attempt, failures, _ = runner.run_daily_paper_if_due(
         last_attempt, failures, next_attempt_at
     )
     assert last_attempt is None
 
-    # 已到 18 点，执行成功
-    monkeypatch.setattr(runner, "_now", lambda: _fixed_now(18, 5))
+    # 已到 15:10，执行成功
+    monkeypatch.setattr(runner, "_now", lambda: _fixed_now(15, 10))
 
     calls = {"n": 0}
 
@@ -67,7 +65,7 @@ def test_daily_task_runs_once_per_day_at_or_after_18(monkeypatch) -> None:
 
 
 def test_daily_task_retries_then_gives_up_for_today(monkeypatch) -> None:
-    monkeypatch.setattr(runner, "_now", lambda: _fixed_now(18, 10))
+    monkeypatch.setattr(runner, "_now", lambda: _fixed_now(15, 12))
     today = date(2026, 8, 7)
 
     def fake_failure(*args, **kwargs):
@@ -93,12 +91,12 @@ def test_daily_task_retries_then_gives_up_for_today(monkeypatch) -> None:
     )
     assert failures == 1
 
-    # 依次推进时间，让 3 次重试全部发生（18:16 / 18:22 / 18:28）
+    # 依次推进时间，让 3 次重试全部发生
     for index in range(3):
         monkeypatch.setattr(
             runner,
             "_now",
-            lambda: _fixed_now(18, 16 + index * 6),
+            lambda index=index: _fixed_now(15, 18 + index * 6),
         )
         last_attempt, failures, next_attempt_at = runner.run_daily_paper_if_due(
             last_attempt, failures, next_attempt_at
