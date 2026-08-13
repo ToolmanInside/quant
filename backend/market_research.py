@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from backend.data.providers import TushareDataProvider
+from backend.models import is_tradeable_board
 
 
 DEFAULT_FACTOR_WEIGHTS = {
@@ -124,6 +125,8 @@ def score_market_snapshot(
         & (table["listing_days"] >= config.minimum_listing_days)
         & (table["amount_yuan"] >= config.minimum_daily_amount)
         & (pd.to_numeric(table["close"], errors="coerce") > 0)
+        # 模拟盘只交易主板/ETF：创业板、科创板、北交所在截面阶段即剔除。
+        & table["ts_code"].map(is_tradeable_board)
     )
     eligible = table.loc[base_filter].copy()
     if len(eligible) < 20:

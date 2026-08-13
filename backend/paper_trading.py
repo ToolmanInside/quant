@@ -11,7 +11,13 @@ import pandas as pd
 
 from backend.data.providers import TushareDataProvider
 from backend.market_research import MarketUniverseConfig, research_full_market
-from backend.models import PaperAdvanceRequest, PaperSimulationRequest, is_etf
+from backend.models import (
+    PaperAdvanceRequest,
+    PaperSimulationRequest,
+    board_lot_size,
+    can_buy_board,
+    is_etf,
+)
 from backend.paper_store import PaperStore
 
 
@@ -783,6 +789,7 @@ def _analyze(
             "unallocated_exposure": 0.0,
             "exposure_constraint": "no_usable_features",
             "unaffordable_symbols": [],
+            "ineligible_board_symbols": [],
             "etf_fallback_used": [],
         }
 
@@ -994,6 +1001,7 @@ def _analyze(
     selected: list[str] = []
     minimum_weights: dict[str, float] = {}
     unaffordable_symbols: list[str] = []
+    ineligible_board_symbols: list[str] = []
     sector_counts: dict[str, int] = {}
     sizing_equity = (
         float(position_sizing_equity)
@@ -1012,6 +1020,11 @@ def _analyze(
             symbol = str(symbol)
             if symbol in selected:
                 continue
+            # 未持仓标的必须落在可交易板块（仅主板/ETF）。
+            # 已持仓允许继续持有与卖出，但不允许对新禁板块加仓/新开。
+            if symbol not in positions and not can_buy_board(symbol, sizing_equity):
+                ineligible_board_symbols.append(symbol)
+                continue
             sector = str(row["sector"])
             if sector_counts.get(sector, 0) >= params["max_per_sector"]:
                 continue
@@ -1021,8 +1034,9 @@ def _analyze(
             # ranked list so its budget can be reassigned to an executable name.
             minimum_weight = 0.0
             if symbol not in positions and sizing_equity > 0:
+                lot = board_lot_size(symbol)
                 minimum_weight = (
-                    100
+                    lot
                     * float(row["raw_close"])
                     * float(params.get("board_lot_price_buffer", 1.10))
                     / sizing_equity
@@ -1113,6 +1127,8 @@ def _analyze(
         if unallocated_exposure > 1e-8 and etf_fallback_used
         else "board_lot_affordability"
         if unallocated_exposure > 1e-8 and unaffordable_symbols
+        else "board_eligibility"
+        if unallocated_exposure > 1e-8 and ineligible_board_symbols
         else "no_eligible_symbols"
         if unallocated_exposure > 1e-8
         else None
@@ -1181,6 +1197,9 @@ def _analyze(
             action = "SELL"
             reason = "仍保留趋势，但仓位高于风险目标"
         elif target_weight > current_weight + 0.025:
+            # 仅主板/ETF 可新开与加仓（已持仓仍可减/平）。
+            if not can_buy_board(symbol, sizing_equity):
+                continue
             action = "BUY"
             if position:
                 reason = "趋势保持且当前仓位低于目标，模拟加仓"
@@ -1248,6 +1267,7 @@ def _analyze(
         "unallocated_exposure": unallocated_exposure,
         "exposure_constraint": exposure_constraint,
         "unaffordable_symbols": unaffordable_symbols,
+        "ineligible_board_symbols": ineligible_board_symbols,
         "etf_fallback_used": etf_fallback_used,
     }
 
@@ -1375,8 +1395,9 @@ def _execute_pending(
             outcome["tradability_warning"] = "price_limit_unavailable"
         current = positions.get(symbol)
         current_shares = int(current["shares"]) if current else 0
+        lot = board_lot_size(symbol)
         target_shares = (
-            int(equity_open * item["target_weight"] / raw_open / 100) * 100
+            int(equity_open * item["target_weight"] / raw_open / lot) * lot
             if item["target_weight"] > 0
             else 0
         )
@@ -1396,7 +1417,7 @@ def _execute_pending(
                 continue
             # An odd-lot residual may be sold only as a complete close.  A
             # maintenance SELL below one board lot is retained and disclosed.
-            if item["action"] == "SELL" and quantity < 100:
+            if item["action"] == "SELL" and quantity < lot:
                 outcome["constraint_reason"] = "board_lot_constraint"
                 outcomes.append(outcome)
                 continue
@@ -1444,10 +1465,15 @@ def _execute_pending(
                 current["avg_price"] = current["cost_basis_total"] / remaining
             action = "CLOSE" if remaining <= 0 else "SELL"
         else:
+            # 买入硬门槛：仅主板/ETF 可买入。
+            if not can_buy_board(symbol, equity_open):
+                outcome["constraint_reason"] = "board_eligibility"
+                outcomes.append(outcome)
+                continue
             requested_quantity = max(target_shares - current_shares, 0)
-            quantity = int(requested_quantity / 100) * 100
+            quantity = int(requested_quantity / lot) * lot
             outcome["planned_quantity"] = quantity
-            if quantity < 100:
+            if quantity < lot:
                 outcome["constraint_reason"] = "board_lot_or_already_at_target"
                 outcomes.append(outcome)
                 continue
@@ -1471,13 +1497,13 @@ def _execute_pending(
             execution_price = raw_open * (1 + slippage_rate)
             if math.isfinite(up_limit):
                 execution_price = min(execution_price, up_limit)
-            while quantity >= 100:
+            while quantity >= lot:
                 gross = quantity * execution_price
                 commission = _commission(gross, costs)
                 if gross + commission <= account["cash"]:
                     break
-                quantity -= 100
-            if quantity < 100:
+                quantity -= lot
+            if quantity < lot:
                 outcome["constraint_reason"] = "insufficient_cash"
                 outcomes.append(outcome)
                 continue
@@ -1973,6 +1999,7 @@ def _process_dates(
             "unallocated_exposure": round(analysis["unallocated_exposure"], 6),
             "exposure_constraint": analysis["exposure_constraint"],
             "unaffordable_symbols": analysis.get("unaffordable_symbols", []),
+            "ineligible_board_symbols": analysis.get("ineligible_board_symbols", []),
             "etf_fallback_used": analysis.get("etf_fallback_used", []),
             "strategy_version": account["current_version"],
         }

@@ -57,6 +57,7 @@ CONSTRAINT_NAMES = {
     "missing_market_frame": "缺少行情序列",
     "no_open_quote": "当日没有开盘报价",
     "no_position_or_already_at_target": "无持仓或已达到目标",
+    "board_eligibility": "不在可交易范围（仅主板/ETF）",
 }
 
 

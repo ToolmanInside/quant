@@ -1266,3 +1266,103 @@ def test_multiday_advance_loads_actions_for_symbols_bought_during_catchup(
     assert result["corporate_actions"][0]["symbol"] == SYMBOLS[0]
     assert result["corporate_actions"][0]["shares_added"] > 0
     store.close()
+
+
+def test_board_helpers_only_main_and_etf_tradeable() -> None:
+    from backend.models import (
+        board_lot_size,
+        board_of,
+        can_buy_board,
+        is_tradeable_board,
+    )
+
+    assert board_of("688008.SH") == "star"
+    assert board_of("300308.SZ") == "chinext"
+    assert board_of("920786.BJ") == "bse"
+    assert board_of("600000.SH") == "main"
+    assert board_of("159919.SZ") == "etf"
+    assert board_lot_size("688008.SH") == 200
+    assert board_lot_size("600000.SH") == 100
+    # 无论资金多少，仅主板/ETF 可买
+    assert is_tradeable_board("600000.SH") is True
+    assert is_tradeable_board("159919.SZ") is True
+    assert is_tradeable_board("688008.SH") is False
+    assert is_tradeable_board("300308.SZ") is False
+    assert is_tradeable_board("920786.BJ") is False
+    assert can_buy_board("600000.SH", 100_000) is True
+    assert can_buy_board("159919.SZ", 100_000) is True
+    assert can_buy_board("688008.SH", 1_000_000) is False
+    assert can_buy_board("300308.SZ", 1_000_000) is False
+    assert can_buy_board("920786.BJ", 1_000_000) is False
+
+
+def test_execute_rejects_star_buy_when_equity_below_threshold(tmp_path) -> None:
+    symbol = "688008.SH"
+    trade_date = pd.Timestamp("2025-12-31")
+    frame = market_frame(0).copy()
+    # Rename is not needed; reuse OHLCV shape under STAR code.
+    store = PaperStore(tmp_path / "paper.txt")
+    store.reset_account("default", 100_000, [symbol], "v1.0-balanced")
+    account = store.account("default")
+    assert account is not None
+    account["pending_plan"] = [
+        {
+            "symbol": symbol,
+            "name": "科创测试",
+            "sector": "半导体",
+            "action": "BUY",
+            "target_weight": 0.20,
+            "reason": "测试科创板门槛",
+        }
+    ]
+    executions, outcomes = _execute_pending(
+        account,
+        {},
+        trade_date,
+        {symbol: frame},
+        {symbol: {"name": "科创测试", "sector_name": "半导体"}},
+        store,
+        PaperCosts(),
+    )
+    assert executions == []
+    assert outcomes[0]["constraint_reason"] == "board_eligibility"
+    store.close()
+
+
+def test_analyze_skips_non_main_boards() -> None:
+    star = "688008.SH"
+    chinext = "300308.SZ"
+    main = SYMBOLS[0]
+    frames = {
+        main: market_frame(0),
+        star: market_frame(1),
+        chinext: market_frame(2),
+        SYMBOLS[1]: market_frame(3),
+        SYMBOLS[2]: market_frame(4),
+        SYMBOLS[3]: market_frame(5),
+    }
+    industries = {
+        main: {"name": "主板", "sector_name": "银行", "sector_code": "801780"},
+        star: {"name": "科创", "sector_name": "半导体", "sector_code": "801080"},
+        chinext: {"name": "创业", "sector_name": "电子", "sector_code": "801080"},
+        SYMBOLS[1]: {"name": "A", "sector_name": "银行", "sector_code": "801780"},
+        SYMBOLS[2]: {"name": "B", "sector_name": "银行", "sector_code": "801780"},
+        SYMBOLS[3]: {"name": "C", "sector_name": "银行", "sector_code": "801780"},
+    }
+    result = _analyze(
+        pd.Timestamp("2025-12-31"),
+        frames,
+        industries,
+        VERSION_LIBRARY["v1.0-aggressive"],
+        {},
+        1_000_000,  # 资金再多也不买创业/科创
+        "moving_average",
+        {"technical_breadth": {"composite": 0.9, "coverage": 0.95}},
+    )
+    assert star not in result["selected_symbols"]
+    assert chinext not in result["selected_symbols"]
+    assert star not in result["target_weights"]
+    assert chinext not in result["target_weights"]
+    buy_symbols = {item["symbol"] for item in result["plan"] if item["action"] == "BUY"}
+    assert star not in buy_symbols
+    assert chinext not in buy_symbols

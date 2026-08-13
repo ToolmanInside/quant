@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import math
 import re
 from typing import Literal
 
@@ -38,6 +39,97 @@ def is_etf(symbol: str) -> bool:
     return code.startswith(("15", "16", "50", "51", "52", "53", "56", "58"))
 
 
+def board_of(symbol: str) -> str:
+    """Return A-share board bucket for trading-rule gates.
+
+    - ``etf``: 场内基金
+    - ``star``: 科创板（688）
+    - ``chinext``: 创业板（300/301）
+    - ``bse``: 北交所（4/8 开头或 .BJ）
+    - ``main``: 沪深主板及其他
+    """
+    if is_etf(symbol):
+        return "etf"
+    code, _, exchange = symbol.upper().partition(".")
+    if code.startswith("688"):
+        return "star"
+    if code.startswith(("300", "301")):
+        return "chinext"
+    if exchange == "BJ" or code.startswith(("4", "8", "9")):
+        # 北交所新代码 920xxx / 旧三板 43/83/87 等
+        if code.startswith(("15", "16")):
+            return "etf"
+        return "bse"
+    return "main"
+
+
+# 本模拟盘硬性可交易板块：仅沪深主板个股 + 场内 ETF。
+# 创业板 / 科创板 / 北交所一律禁止新开与加仓（已持仓仍可减/平）。
+TRADEABLE_BOARDS: frozenset[str] = frozenset({"main", "etf"})
+
+# 保留资产门槛常量供展示/对照；当前策略不再按权益放开创业板/科创/北交。
+BOARD_ASSET_THRESHOLDS: dict[str, float] = {
+    "main": 0.0,
+    "etf": 0.0,
+    "chinext": 100_000.0,
+    "star": 500_000.0,
+    "bse": 500_000.0,
+}
+
+BOARD_NAMES: dict[str, str] = {
+    "main": "主板",
+    "etf": "ETF",
+    "chinext": "创业板",
+    "star": "科创板",
+    "bse": "北交所",
+}
+
+
+def board_asset_threshold(symbol: str) -> float:
+    return float(BOARD_ASSET_THRESHOLDS.get(board_of(symbol), 0.0))
+
+
+def board_lot_size(symbol: str) -> int:
+    """Minimum buy board lot. STAR Market requires 200 shares."""
+    if board_of(symbol) == "star":
+        return 200
+    return 100
+
+
+def is_tradeable_board(symbol: str) -> bool:
+    """Whether the symbol's board is in the allowed trading universe."""
+    return board_of(symbol) in TRADEABLE_BOARDS
+
+
+def can_buy_board(symbol: str, equity: float | None = None) -> bool:
+    """Whether a new buy/add is allowed on this board.
+
+    Policy: only main-board stocks and ETFs. ChiNext / STAR / BSE are blocked
+    regardless of account equity. ``equity`` is kept for API compatibility and
+    future optional thresholds.
+    """
+    if not is_tradeable_board(symbol):
+        return False
+    if equity is None:
+        return True
+    try:
+        assets = float(equity)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(assets) and assets > 0
+
+
+def board_buy_block_reason(symbol: str, equity: float | None = None) -> str | None:
+    """Human-readable buy block reason, or None if buy is allowed."""
+    if can_buy_board(symbol, equity):
+        return None
+    board = board_of(symbol)
+    name = BOARD_NAMES.get(board, board)
+    if board not in TRADEABLE_BOARDS:
+        return f"{name}不在可交易范围（仅主板/ETF）"
+    return f"{name}当前不可买入"
+
+
 DEFAULT_MATRIX_SYMBOLS = [
     "159611.SZ",
     "002317.SZ",
@@ -46,12 +138,12 @@ DEFAULT_MATRIX_SYMBOLS = [
     "600367.SH",
     "000811.SZ",
     "002714.SZ",
-    "300308.SZ",
-    "300502.SZ",
-    "688498.SH",
-    "300394.SZ",
+    "600036.SH",
+    "601318.SH",
+    "000858.SZ",
+    "600519.SH",
     "002371.SZ",
-    "688008.SH",
+    "600276.SH",
 ]
 
 
