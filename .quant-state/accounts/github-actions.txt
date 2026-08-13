@@ -91,7 +91,7 @@
       "simulation_end_date": "2026-07-30"
     },
     "created_at": "2026-08-13T08:17:18",
-    "updated_at": "2026-08-13T08:19:37",
+    "updated_at": "2026-08-13T08:39:31",
     "market_research": {
       "mode": "full_market",
       "trade_date": "2026-08-13",
